@@ -314,12 +314,18 @@ func (s *stubJobStore) CompleteJob(_ context.Context, id uuid.UUID, bytes int64)
 	})
 }
 func (s *stubJobStore) FailJob(_ context.Context, id uuid.UUID, errSummary string) error {
-	return s.transition(id, "running", func(j *catalog.BackupJob) {
-		now := time.Now()
-		j.Status = "failed"
-		j.FinishedAt = &now
-		j.ErrorSummary = &errSummary
-	})
+	j, ok := s.jobs[id]
+	if !ok {
+		return catalog.ErrNotFound
+	}
+	if j.Status != "running" && j.Status != "pending" {
+		return catalog.ErrIllegalTransition
+	}
+	now := time.Now()
+	j.Status = "failed"
+	j.FinishedAt = &now
+	j.ErrorSummary = &errSummary
+	return nil
 }
 func (s *stubJobStore) CancelJob(_ context.Context, id uuid.UUID, reason string) error {
 	return s.transition(id, "running", func(j *catalog.BackupJob) {

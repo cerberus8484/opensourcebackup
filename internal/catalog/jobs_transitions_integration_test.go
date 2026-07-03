@@ -89,6 +89,16 @@ func TestJobStore_GuardedTransitions(t *testing.T) {
 		}
 	})
 
+	t.Run("pending→failed (agent could not start)", func(t *testing.T) {
+		j := mkStatus("pending")
+		if err := store.FailJob(ctx, j.ID, "get policy failed"); err != nil {
+			t.Fatalf("FailJob from pending: %v", err)
+		}
+		if s := statusOf(j.ID); s != "failed" {
+			t.Errorf("status = %q, want failed", s)
+		}
+	})
+
 	t.Run("running→cancelled sets reason", func(t *testing.T) {
 		j := mkStatus("running")
 		if err := store.CancelJob(ctx, j.ID, "Windows-Update"); err != nil {

@@ -74,6 +74,17 @@ func (p *program) run() {
 		logger.Warn("TLS verification disabled — dev only")
 	}
 
+	// The outbox must live in a persistent, writable directory — not the process
+	// cwd (systemd often runs the agent from /). Default next to the token file.
+	outboxDir := os.Getenv("AGENT_OUTBOX_DIR")
+	if outboxDir == "" {
+		if tf := os.Getenv("AGENT_TOKEN_FILE"); tf != "" {
+			outboxDir = filepath.Join(filepath.Dir(tf), "outbox")
+		} else {
+			outboxDir = filepath.Join("data", "outbox")
+		}
+	}
+
 	cp := agentclient.New(controlPlaneURL, token, skipTLS)
 	a := agent.New(agent.Config{
 		PollInterval:    poll,
@@ -81,6 +92,7 @@ func (p *program) run() {
 		ResticPassword:  resticPassword,
 		ResticRepo:      resticRepo,
 		RestoreTestRoot: restoreRoot,
+		OutboxDir:       outboxDir,
 	}, cp, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -233,6 +245,17 @@ func runInteractive(logger *slog.Logger) {
 	}
 
 	skipTLS := os.Getenv("AGENT_TLS_SKIP_VERIFY") == "true"
+	// The outbox must live in a persistent, writable directory — not the process
+	// cwd (systemd often runs the agent from /). Default next to the token file.
+	outboxDir := os.Getenv("AGENT_OUTBOX_DIR")
+	if outboxDir == "" {
+		if tf := os.Getenv("AGENT_TOKEN_FILE"); tf != "" {
+			outboxDir = filepath.Join(filepath.Dir(tf), "outbox")
+		} else {
+			outboxDir = filepath.Join("data", "outbox")
+		}
+	}
+
 	cp := agentclient.New(controlPlaneURL, token, skipTLS)
 	a := agent.New(agent.Config{
 		PollInterval:    poll,
@@ -240,6 +263,7 @@ func runInteractive(logger *slog.Logger) {
 		ResticPassword:  resticPassword,
 		ResticRepo:      resticRepo,
 		RestoreTestRoot: restoreRoot,
+		OutboxDir:       outboxDir,
 	}, cp, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -387,7 +411,7 @@ OpenSourceBackup Agent — Usage:
   %s status           Show service status
 
 Environment variables (required):
-  CONTROL_PLANE_URL   URL of the Control Plane (e.g. http://192.168.1.100:8080)
+  CONTROL_PLANE_URL   URL of the Control Plane (e.g. http://<control-plane-host>:8080)
   RESTIC_PASSWORD     Encryption password for backups
   RESTIC_REPO         Backup destination (e.g. /mnt/nas/backups or Z:\Backups)
 
