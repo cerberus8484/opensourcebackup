@@ -144,7 +144,8 @@ func httpStatusForError(err error) int {
 	switch {
 	case errors.Is(err, catalog.ErrNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, catalog.ErrConflict):
+	case errors.Is(err, catalog.ErrConflict),
+		errors.Is(err, catalog.ErrIllegalTransition):
 		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError
@@ -162,6 +163,8 @@ func safeErrorMessage(err error) string {
 		return "not found"
 	case errors.Is(err, catalog.ErrConflict):
 		return "conflict"
+	case errors.Is(err, catalog.ErrIllegalTransition):
+		return "job is no longer in a state that allows this change"
 	default:
 		return "internal error"
 	}

@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -34,14 +33,11 @@ func (h *Handler) startAgentJob(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	now := time.Now()
-	job.Status = "running"
-	job.StartedAt = &now
-	if err := h.jobs.Update(r.Context(), job); err != nil {
+	if err := h.jobs.StartJob(r.Context(), job.ID); err != nil {
 		writeError(w, httpStatusForError(err), safeErrorMessage(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, job)
+	writeFreshJob(w, h, r, job.ID)
 }
 
 // completeAgentJob handles PUT /v1/agent/jobs/{id}/complete.
@@ -60,11 +56,10 @@ func (h *Handler) completeAgentJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now()
-	job.Status = "success"
-	job.FinishedAt = &now
-	job.BytesUploaded = &body.BytesUploaded
-	if err := h.jobs.Update(r.Context(), job); err != nil {
+	// Guarded running → success. If the job is no longer running (e.g. the reaper
+	// already failed it, or a duplicate report arrived), this returns 409 rather
+	// than resurrecting a terminal job.
+	if err := h.jobs.CompleteJob(r.Context(), job.ID, body.BytesUploaded); err != nil {
 		writeError(w, httpStatusForError(err), safeErrorMessage(err))
 		return
 	}
@@ -91,7 +86,7 @@ func (h *Handler) completeAgentJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, job)
+	writeFreshJob(w, h, r, job.ID)
 }
 
 // failAgentJob handles PUT /v1/agent/jobs/{id}/fail.
@@ -107,15 +102,11 @@ func (h *Handler) failAgentJob(w http.ResponseWriter, r *http.Request) {
 		handleDecodeError(w, err)
 		return
 	}
-	now := time.Now()
-	job.Status = "failed"
-	job.FinishedAt = &now
-	job.ErrorSummary = &body.ErrorSummary
-	if err := h.jobs.Update(r.Context(), job); err != nil {
+	if err := h.jobs.FailJob(r.Context(), job.ID, body.ErrorSummary); err != nil {
 		writeError(w, httpStatusForError(err), safeErrorMessage(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, job)
+	writeFreshJob(w, h, r, job.ID)
 }
 
 // progressAgentJob handles PUT /v1/agent/jobs/{id}/progress — live progress updates
@@ -158,18 +149,22 @@ func (h *Handler) cancelledAgentJob(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	now := time.Now()
-	job.Status = "cancelled"
-	job.FinishedAt = &now
-	if job.CancelReason != "" {
-		reason := job.CancelReason
-		job.ErrorSummary = &reason
-	}
-	if err := h.jobs.Update(r.Context(), job); err != nil {
+	if err := h.jobs.CancelJob(r.Context(), job.ID, job.CancelReason); err != nil {
 		writeError(w, httpStatusForError(err), safeErrorMessage(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, job)
+	writeFreshJob(w, h, r, job.ID)
+}
+
+// writeFreshJob re-reads a job after a guarded transition and writes it as the
+// response, so the agent always sees the authoritative post-transition state.
+func writeFreshJob(w http.ResponseWriter, h *Handler, r *http.Request, id uuid.UUID) {
+	fresh, err := h.jobs.GetByID(r.Context(), id)
+	if err != nil {
+		writeError(w, httpStatusForError(err), safeErrorMessage(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, fresh)
 }
 
 // claimJob fetches a job and verifies it belongs to the authenticated system.

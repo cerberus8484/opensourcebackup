@@ -58,13 +58,17 @@ func TestJobStore_FailStaleJobs(t *testing.T) {
 	jobD := mkJob("running", 2*time.Hour, dur(40*time.Minute))
 	// E: success, started 13h ago → never reaped (terminal status)
 	jobE := mkJob("success", 13*time.Hour, nil)
+	// F: pending, created 7h ago → STALE (pending grace 6h) — offline agent
+	jobF := mkPending(t, db, store, sys, pol, 7*time.Hour)
+	// G: pending, created 1h ago → live (agent may still pick it up)
+	jobG := mkPending(t, db, store, sys, pol, 1*time.Hour)
 
-	n, err := store.FailStaleJobs(ctx, 30*time.Minute, 12*time.Hour)
+	n, err := store.FailStaleJobs(ctx, 30*time.Minute, 12*time.Hour, 6*time.Hour)
 	if err != nil {
 		t.Fatalf("FailStaleJobs: %v", err)
 	}
-	if n != 2 {
-		t.Errorf("want 2 reaped, got %d", n)
+	if n != 3 {
+		t.Errorf("want 3 reaped, got %d", n)
 	}
 
 	wantStatus := func(j *catalog.BackupJob, want string) {
@@ -90,4 +94,23 @@ func TestJobStore_FailStaleJobs(t *testing.T) {
 	wantStatus(jobC, "running") // recent heartbeat
 	wantStatus(jobD, "failed")  // stale by progress grace
 	wantStatus(jobE, "success") // terminal, untouched
+	wantStatus(jobF, "failed")  // stale pending — offline agent never claimed it
+	wantStatus(jobG, "pending") // recent pending — still claimable
+}
+
+// mkPending creates a pending job and back-dates its created_at via raw SQL so the
+// pending-grace branch of the reaper can be tested deterministically.
+func mkPending(t *testing.T, db *catalog.DB, store catalog.JobStore, sys *catalog.System, pol *catalog.BackupPolicy, createdAgo time.Duration) *catalog.BackupJob {
+	t.Helper()
+	ctx := context.Background()
+	j := &catalog.BackupJob{SystemID: sys.ID, PolicyID: pol.ID, Status: "pending"}
+	if err := store.Create(ctx, j); err != nil {
+		t.Fatalf("create pending job: %v", err)
+	}
+	created := time.Now().Add(-createdAgo)
+	if _, err := db.Pool().Exec(ctx,
+		`UPDATE backup_jobs SET created_at=$1 WHERE id=$2`, created, j.ID); err != nil {
+		t.Fatalf("set created_at: %v", err)
+	}
+	return j
 }

@@ -418,19 +418,25 @@ func (s *Scheduler) cleanStaleRestoreTests(ctx context.Context, staleAfter time.
 
 // ── Stale-Job-Reaper ───────────────────────────────────────────────────────────
 
-// runStaleJobReaper periodically auto-fails backup/retention jobs that are stuck
-// in "running" without any agent heartbeat. Without this, a crashed agent or a
-// network partition leaves jobs running forever — they never finish, block the
-// dashboard's live view, and hide the fact that the backup never completed.
+// runStaleJobReaper periodically auto-fails jobs the dashboard would otherwise
+// show as stuck: "running" jobs without an agent heartbeat, and "pending" jobs an
+// offline agent never claimed. Without this, a crashed or offline agent leaves
+// jobs running forever or piling up pending — both hide the fact that the backup
+// never completed and make the dashboard untrustworthy.
 //
-// Two grace periods (see catalog.JobStore.FailStaleJobs):
+// Three grace periods (see catalog.JobStore.FailStaleJobs):
 //   - progressGrace: a job that reported progress, then went silent.
 //   - startGrace:    a job that never reported progress (older agent builds),
 //                    measured from start — generous so genuinely long backups
 //                    on non-reporting agents are not killed prematurely.
+//   - pendingGrace:  a job created but never picked up — a healthy agent claims
+//                    pending work within seconds, so this is generous enough to
+//                    survive a brief control-plane/agent restart, but catches
+//                    agents that are actually offline.
 func (s *Scheduler) runStaleJobReaper(ctx context.Context) {
 	const progressGrace = 30 * time.Minute // silent since last progress report
 	const startGrace    = 12 * time.Hour   // no progress ever, running this long
+	const pendingGrace  = 6 * time.Hour    // created, never claimed by an agent
 	const checkEvery    = 10 * time.Minute
 
 	ticker := time.NewTicker(checkEvery)
@@ -440,14 +446,15 @@ func (s *Scheduler) runStaleJobReaper(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			n, err := s.jobs.FailStaleJobs(ctx, progressGrace, startGrace)
+			n, err := s.jobs.FailStaleJobs(ctx, progressGrace, startGrace, pendingGrace)
 			if err != nil {
 				s.log.Error("stale-job-reaper: failed to reap stale jobs", "error", err)
 				continue
 			}
 			if n > 0 {
 				s.log.Warn("stale-job-reaper: auto-failed stuck jobs",
-					"count", n, "progress_grace", progressGrace, "start_grace", startGrace)
+					"count", n, "progress_grace", progressGrace,
+					"start_grace", startGrace, "pending_grace", pendingGrace)
 			}
 		}
 	}
