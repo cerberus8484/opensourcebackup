@@ -21,6 +21,16 @@ const defaultTimeout = 30 * time.Second
 // The agent should stop and be re-enrolled.
 var ErrUnauthorized = errors.New("agent: unauthorized — token revoked or invalid")
 
+// ErrConflict is returned on HTTP 409 — the job is no longer in a state that
+// allows the requested change (e.g. a terminal outcome reported for a job the
+// reaper already failed). The outbox treats this as permanent: retrying a
+// conflicting terminal report never succeeds, so the event is dropped, not looped.
+var ErrConflict = errors.New("agent: conflict — job no longer accepts this change")
+
+// ErrNotFound is returned on HTTP 404 — the job/resource no longer exists.
+// Also permanent from the outbox's perspective.
+var ErrNotFound = errors.New("agent: not found")
+
 // Client communicates with the OpensourceBackup control plane using
 // the authenticated /v1/agent/* routes.
 type Client struct {
@@ -235,6 +245,12 @@ func (c *Client) get(ctx context.Context, url string, out any) error {
 	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrUnauthorized
 	}
+	if resp.StatusCode == http.StatusConflict {
+		return ErrConflict
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
@@ -271,6 +287,12 @@ func (c *Client) sendJSON(ctx context.Context, method, url string, body any, out
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrUnauthorized
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return ErrConflict
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrNotFound
 	}
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)

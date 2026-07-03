@@ -50,10 +50,10 @@ type JobStore interface {
 	// Allowed edges: pending→running, running→success, running→failed,
 	// running→cancelled. Terminal states (success/failed/cancelled) are immutable.
 	//
-	// StartJob:    pending → running   (agent claimed the job and began work)
-	// CompleteJob: running → success   (backup finished, snapshot recorded)
-	// FailJob:     running → failed    (agent reported an error)
-	// CancelJob:   running → cancelled (agent stopped on operator request)
+	// StartJob:    pending → running          (agent claimed the job and began work)
+	// CompleteJob: running → success          (backup finished, snapshot recorded)
+	// FailJob:     running|pending → failed   (agent reported an error, possibly pre-start)
+	// CancelJob:   running → cancelled         (agent stopped on operator request)
 	StartJob(ctx context.Context, id uuid.UUID) error
 	CompleteJob(ctx context.Context, id uuid.UUID, bytesUploaded int64) error
 	FailJob(ctx context.Context, id uuid.UUID, errorSummary string) error
@@ -280,11 +280,13 @@ func (s *pgJobStore) CompleteJob(ctx context.Context, id uuid.UUID, bytesUploade
 	)
 }
 
-// FailJob: running → failed.
+// FailJob: running → failed, or pending → failed. An agent may fail a job it
+// claimed but could not even start (e.g. the policy or repository lookup failed),
+// so failing from pending is allowed. Terminal jobs stay rejected.
 func (s *pgJobStore) FailJob(ctx context.Context, id uuid.UUID, errorSummary string) error {
 	return s.applyTransition(ctx, id, `
 		UPDATE backup_jobs SET status='failed', finished_at=NOW(), error_summary=$2
-		WHERE id=$1 AND status='running'`,
+		WHERE id=$1 AND status IN ('running','pending')`,
 		pgtype.UUID{Bytes: id, Valid: true}, errorSummary,
 	)
 }
