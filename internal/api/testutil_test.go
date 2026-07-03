@@ -281,8 +281,56 @@ func (s *stubJobStore) RequestCancel(_ context.Context, id uuid.UUID, reason str
 	return nil
 }
 
-func (s *stubJobStore) FailStaleJobs(_ context.Context, _, _ time.Duration) (int, error) {
+func (s *stubJobStore) FailStaleJobs(_ context.Context, _, _, _ time.Duration) (int, error) {
 	return 0, nil
+}
+// transition mirrors the real guarded store: only from the allowed source state,
+// otherwise ErrIllegalTransition (or ErrNotFound). Keeps handler tests faithful.
+func (s *stubJobStore) transition(id uuid.UUID, from string, mutate func(*catalog.BackupJob)) error {
+	j, ok := s.jobs[id]
+	if !ok {
+		return catalog.ErrNotFound
+	}
+	if j.Status != from {
+		return catalog.ErrIllegalTransition
+	}
+	mutate(j)
+	return nil
+}
+
+func (s *stubJobStore) StartJob(_ context.Context, id uuid.UUID) error {
+	return s.transition(id, "pending", func(j *catalog.BackupJob) {
+		now := time.Now()
+		j.Status = "running"
+		j.StartedAt = &now
+	})
+}
+func (s *stubJobStore) CompleteJob(_ context.Context, id uuid.UUID, bytes int64) error {
+	return s.transition(id, "running", func(j *catalog.BackupJob) {
+		now := time.Now()
+		j.Status = "success"
+		j.FinishedAt = &now
+		j.BytesUploaded = &bytes
+	})
+}
+func (s *stubJobStore) FailJob(_ context.Context, id uuid.UUID, errSummary string) error {
+	return s.transition(id, "running", func(j *catalog.BackupJob) {
+		now := time.Now()
+		j.Status = "failed"
+		j.FinishedAt = &now
+		j.ErrorSummary = &errSummary
+	})
+}
+func (s *stubJobStore) CancelJob(_ context.Context, id uuid.UUID, reason string) error {
+	return s.transition(id, "running", func(j *catalog.BackupJob) {
+		now := time.Now()
+		j.Status = "cancelled"
+		j.FinishedAt = &now
+		if reason != "" {
+			r := reason
+			j.ErrorSummary = &r
+		}
+	})
 }
 
 func (s *stubJobStore) Delete(_ context.Context, id uuid.UUID) error {

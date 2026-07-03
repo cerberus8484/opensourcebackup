@@ -81,9 +81,13 @@ func (s *stubJobStore) FinalizeProgress(_ context.Context, _ uuid.UUID) error { 
 func (s *stubJobStore) RequestCancel(_ context.Context, _ uuid.UUID, _ string) error {
 	return nil
 }
-func (s *stubJobStore) FailStaleJobs(_ context.Context, _, _ time.Duration) (int, error) {
+func (s *stubJobStore) FailStaleJobs(_ context.Context, _, _, _ time.Duration) (int, error) {
 	return 0, nil
 }
+func (s *stubJobStore) StartJob(_ context.Context, _ uuid.UUID) error              { return nil }
+func (s *stubJobStore) CompleteJob(_ context.Context, _ uuid.UUID, _ int64) error  { return nil }
+func (s *stubJobStore) FailJob(_ context.Context, _ uuid.UUID, _ string) error     { return nil }
+func (s *stubJobStore) CancelJob(_ context.Context, _ uuid.UUID, _ string) error   { return nil }
 
 // --- tests ---
 

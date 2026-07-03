@@ -41,13 +41,33 @@ type JobStore interface {
 	// RequestCancel marks a running job for cooperative cancellation (B_JOB_CANCEL).
 	// The agent polls this flag and stops restic; only running/pending jobs qualify.
 	RequestCancel(ctx context.Context, id uuid.UUID, reason string) error
-	// FailStaleJobs auto-fails running jobs that have gone silent (Stale-Job-Reaper).
-	// A job is stale when EITHER it reported progress but then stopped for longer
-	// than progressGrace, OR it never reported progress and has been running since
-	// before startGrace (covers agents that don't emit progress). Returns the count
-	// of jobs failed. Protects against agent crashes / network loss leaving jobs
-	// stuck "running" forever.
-	FailStaleJobs(ctx context.Context, progressGrace, startGrace time.Duration) (int, error)
+
+	// ── Guarded lifecycle transitions ──────────────────────────────────────────
+	// These are the ONLY sanctioned way to change a job's status. Each performs an
+	// atomic, conditional UPDATE keyed on the allowed source state, so an illegal
+	// transition (e.g. a late agent report completing an already-failed job) can
+	// never silently corrupt the lifecycle — it returns ErrIllegalTransition.
+	// Allowed edges: pending→running, running→success, running→failed,
+	// running→cancelled. Terminal states (success/failed/cancelled) are immutable.
+	//
+	// StartJob:    pending → running   (agent claimed the job and began work)
+	// CompleteJob: running → success   (backup finished, snapshot recorded)
+	// FailJob:     running → failed    (agent reported an error)
+	// CancelJob:   running → cancelled (agent stopped on operator request)
+	StartJob(ctx context.Context, id uuid.UUID) error
+	CompleteJob(ctx context.Context, id uuid.UUID, bytesUploaded int64) error
+	FailJob(ctx context.Context, id uuid.UUID, errorSummary string) error
+	CancelJob(ctx context.Context, id uuid.UUID, reason string) error
+
+	// FailStaleJobs auto-fails jobs the dashboard would otherwise show as stuck.
+	// A RUNNING job is stale when EITHER it reported progress but then stopped for
+	// longer than progressGrace, OR it never reported progress and has been running
+	// since before startGrace (covers agents that don't emit progress). A PENDING
+	// job is stale when it was created before pendingGrace and never claimed — the
+	// target agent is offline and will never run it. Returns the count of jobs
+	// failed. Protects against agent crashes / network loss leaving jobs stuck
+	// "running" or piling up "pending" forever.
+	FailStaleJobs(ctx context.Context, progressGrace, startGrace, pendingGrace time.Duration) (int, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
@@ -216,13 +236,80 @@ func (s *pgJobStore) RequestCancel(ctx context.Context, id uuid.UUID, reason str
 	return nil
 }
 
-func (s *pgJobStore) FailStaleJobs(ctx context.Context, progressGrace, startGrace time.Duration) (int, error) {
+// applyTransition runs a guarded status UPDATE and, when no row matched,
+// distinguishes "job does not exist" (ErrNotFound) from "job exists but is not in
+// an allowed source state" (ErrIllegalTransition). The status check only runs on
+// the failure path, so the happy path stays a single round-trip.
+func (s *pgJobStore) applyTransition(ctx context.Context, id uuid.UUID, sql string, args ...any) error {
+	tag, err := s.db.pool.Exec(ctx, sql, args...)
+	if err != nil {
+		return fmt.Errorf("job transition: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	var current string
+	err = s.db.pool.QueryRow(ctx,
+		`SELECT status FROM backup_jobs WHERE id=$1`,
+		pgtype.UUID{Bytes: id, Valid: true},
+	).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("job transition status check: %w", err)
+	}
+	return fmt.Errorf("%w: job is %q", ErrIllegalTransition, current)
+}
+
+// StartJob: pending → running.
+func (s *pgJobStore) StartJob(ctx context.Context, id uuid.UUID) error {
+	return s.applyTransition(ctx, id, `
+		UPDATE backup_jobs SET status='running', started_at=NOW()
+		WHERE id=$1 AND status='pending'`,
+		pgtype.UUID{Bytes: id, Valid: true},
+	)
+}
+
+// CompleteJob: running → success.
+func (s *pgJobStore) CompleteJob(ctx context.Context, id uuid.UUID, bytesUploaded int64) error {
+	return s.applyTransition(ctx, id, `
+		UPDATE backup_jobs SET status='success', finished_at=NOW(), bytes_uploaded=$2
+		WHERE id=$1 AND status='running'`,
+		pgtype.UUID{Bytes: id, Valid: true}, bytesUploaded,
+	)
+}
+
+// FailJob: running → failed.
+func (s *pgJobStore) FailJob(ctx context.Context, id uuid.UUID, errorSummary string) error {
+	return s.applyTransition(ctx, id, `
+		UPDATE backup_jobs SET status='failed', finished_at=NOW(), error_summary=$2
+		WHERE id=$1 AND status='running'`,
+		pgtype.UUID{Bytes: id, Valid: true}, errorSummary,
+	)
+}
+
+// CancelJob: running → cancelled. A deliberate stop is not a failure; the reason
+// is stored in error_summary for context (NULL when empty).
+func (s *pgJobStore) CancelJob(ctx context.Context, id uuid.UUID, reason string) error {
+	return s.applyTransition(ctx, id, `
+		UPDATE backup_jobs SET status='cancelled', finished_at=NOW(), error_summary=NULLIF($2,'')
+		WHERE id=$1 AND status='running'`,
+		pgtype.UUID{Bytes: id, Valid: true}, reason,
+	)
+}
+
+func (s *pgJobStore) FailStaleJobs(ctx context.Context, progressGrace, startGrace, pendingGrace time.Duration) (int, error) {
 	now := time.Now()
 	progressDeadline := now.Add(-progressGrace) // reported progress, then went silent
 	startDeadline := now.Add(-startGrace)       // never reported progress (old agent)
-	const reason = "auto-failed: no agent heartbeat — the agent may have crashed or lost connection"
+	pendingDeadline := now.Add(-pendingGrace)   // created but never picked up (offline agent)
 
-	tag, err := s.db.pool.Exec(ctx, `
+	const runningReason = "auto-failed: no agent heartbeat — the agent may have crashed or lost connection"
+	const pendingReason = "auto-failed: never picked up by an agent — the target agent appears offline"
+
+	// (1) Running jobs that went silent.
+	tagRunning, err := s.db.pool.Exec(ctx, `
 		UPDATE backup_jobs
 		SET status='failed', finished_at=NOW(), error_summary=$1
 		WHERE status='running' AND (
@@ -230,12 +317,27 @@ func (s *pgJobStore) FailStaleJobs(ctx context.Context, progressGrace, startGrac
 			OR
 			(last_progress_at IS NULL AND COALESCE(started_at, created_at) < $3)
 		)`,
-		reason, progressDeadline, startDeadline,
+		runningReason, progressDeadline, startDeadline,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("fail stale jobs: %w", err)
+		return 0, fmt.Errorf("fail stale running jobs: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+
+	// (2) Pending jobs an offline agent never claimed. A healthy agent picks up
+	// pending work within its poll interval (seconds), so anything older than
+	// pendingGrace means the target agent is not processing — fail it so the
+	// dashboard reflects reality and the scheduler can queue a fresh job later.
+	tagPending, err := s.db.pool.Exec(ctx, `
+		UPDATE backup_jobs
+		SET status='failed', finished_at=NOW(), error_summary=$1
+		WHERE status='pending' AND created_at < $2`,
+		pendingReason, pendingDeadline,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("fail stale pending jobs: %w", err)
+	}
+
+	return int(tagRunning.RowsAffected() + tagPending.RowsAffected()), nil
 }
 
 func (s *pgJobStore) Delete(ctx context.Context, id uuid.UUID) error {
