@@ -10,10 +10,12 @@ import (
 	"syscall"
 	"time"
 
+	root "github.com/cerberus8484/opensourcebackup"
 	"github.com/cerberus8484/opensourcebackup/internal/api"
 	"github.com/cerberus8484/opensourcebackup/internal/audit"
 	"github.com/cerberus8484/opensourcebackup/internal/auth"
 	"github.com/cerberus8484/opensourcebackup/internal/catalog"
+	"github.com/cerberus8484/opensourcebackup/internal/migrate"
 	"github.com/cerberus8484/opensourcebackup/internal/metrics"
 	"github.com/cerberus8484/opensourcebackup/internal/scheduler"
 	"github.com/cerberus8484/opensourcebackup/internal/security"
@@ -49,6 +51,13 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Apply pending schema migrations before anything touches the DB. Fail fast:
+	// the control plane must never serve traffic against a half-applied schema.
+	if err := migrate.Run(ctx, dsn, root.MigrationsFS, logger); err != nil {
+		logger.Error("database migration failed", "error", err)
+		os.Exit(1)
+	}
 
 	db, err := catalog.Open(ctx, dsn)
 	if err != nil {
