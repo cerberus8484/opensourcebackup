@@ -21,6 +21,10 @@ test:
 test-integration:
 	DATABASE_URL=$(DATABASE_URL) go test -p 1 -tags=integration ./...
 
+# Local end-to-end verification; DATABASE_URL must point to a disposable PostgreSQL database.
+test-e2e:
+	DATABASE_URL=$(DATABASE_URL) go test -count=1 -tags=e2e ./internal/e2e
+
 # ── Format ──────────────────────────────────────────────────────────────────
 fmt:
 	gofmt -w .
