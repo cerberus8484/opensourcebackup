@@ -7,12 +7,21 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/cerberus8484/opensourcebackup/internal/audit"
 	"github.com/cerberus8484/opensourcebackup/internal/auth"
 	"github.com/cerberus8484/opensourcebackup/internal/catalog"
 )
+
+// DispatchAdmitter is the seam (E1.1) through which a claimed pending job is
+// admitted to running. It lets the dispatch decision (per-agent concurrency now;
+// system state, repository / global / site limits later) evolve without the HTTP
+// layer knowing the rules. A nil admitter falls back to an unguarded start.
+type DispatchAdmitter interface {
+	AdmitStart(ctx context.Context, jobID uuid.UUID) (catalog.DispatchDecision, error)
+}
 
 // PolicyChangeNotifier is called after any policy create/update/delete
 // so the scheduler can reload its cron entries without a restart.
@@ -34,12 +43,13 @@ type Handler struct {
 	restoreTests     catalog.RestoreTestStore
 	enrollmentTokens auth.EnrollmentTokenStore
 	agentTokens      auth.AgentTokenStore
-	policyNotifier   PolicyChangeNotifier         // may be nil
-	webAuth          *auth.WebAuthenticator       // legacy single-password (fallback)
-	sessions         *auth.RBACSessionManager     // multi-user sessions; nil = legacy mode
-	users            auth.UserStore               // nil = legacy single-password mode
+	policyNotifier   PolicyChangeNotifier     // may be nil
+	webAuth          *auth.WebAuthenticator   // legacy single-password (fallback)
+	sessions         *auth.RBACSessionManager // multi-user sessions; nil = legacy mode
+	users            auth.UserStore           // nil = legacy single-password mode
 	auditStore       audit.Store
-	dbPool           *pgxpool.Pool                // for direct DB operations (notifications etc.)
+	dbPool           *pgxpool.Pool    // for direct DB operations (notifications etc.)
+	dispatch         DispatchAdmitter // E1.1 dispatch guard; nil = unguarded start
 	log              *slog.Logger
 }
 
@@ -83,6 +93,13 @@ func (h *Handler) WithWebAuth(wa *auth.WebAuthenticator) *Handler {
 // WithDBPool stores the raw pool for direct DB operations.
 func (h *Handler) WithDBPool(pool *pgxpool.Pool) *Handler {
 	h.dbPool = pool
+	return h
+}
+
+// WithDispatchGuard wires the E1.1 dispatch guard used when an agent starts a job.
+// When unset, job starts fall back to an unguarded pending→running transition.
+func (h *Handler) WithDispatchGuard(g DispatchAdmitter) *Handler {
+	h.dispatch = g
 	return h
 }
 

@@ -5,6 +5,7 @@ package catalog_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cerberus8484/opensourcebackup/internal/catalog"
 )
@@ -13,7 +14,11 @@ func createFixtureSystemAndPolicy(t *testing.T, db *catalog.DB) (*catalog.System
 	t.Helper()
 	ctx := context.Background()
 
-	sys := &catalog.System{Hostname: "fixture-host", RiskClass: "standard"}
+	// Stamp last_seen=now so the fixture system is ONLINE — the E1.3a health gate
+	// blocks OFFLINE/UNKNOWN systems, and dispatch tests need a healthy agent to
+	// reach the operation-state and concurrency gates.
+	now := time.Now().UTC()
+	sys := &catalog.System{Hostname: "fixture-host", RiskClass: "standard", LastSeen: &now}
 	if err := catalog.NewSystemStore(db).Create(ctx, sys); err != nil {
 		t.Fatalf("fixture system: %v", err)
 	}

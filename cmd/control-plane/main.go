@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -15,8 +16,8 @@ import (
 	"github.com/cerberus8484/opensourcebackup/internal/audit"
 	"github.com/cerberus8484/opensourcebackup/internal/auth"
 	"github.com/cerberus8484/opensourcebackup/internal/catalog"
-	"github.com/cerberus8484/opensourcebackup/internal/migrate"
 	"github.com/cerberus8484/opensourcebackup/internal/metrics"
+	"github.com/cerberus8484/opensourcebackup/internal/migrate"
 	"github.com/cerberus8484/opensourcebackup/internal/scheduler"
 	"github.com/cerberus8484/opensourcebackup/internal/security"
 )
@@ -39,6 +40,32 @@ const (
 	globalRatePerSec = 20.0
 	globalBurst      = 20.0
 )
+
+// dispatchLimitsFromEnv resolves the three concurrency ceilings from the
+// environment, each falling back to the conservative production default when the
+// variable is unset or unparseable. Leaving all three unset reproduces the exact
+// production defaults (20 / 5 / 1) — this hook exists so operators can tune the
+// ceilings without a rebuild, and so local E2E runs can use small, observable
+// limits. Values are clamped to >= 1 by NewDispatchGuardWithLimits.
+func dispatchLimitsFromEnv(logger *slog.Logger) catalog.DispatchLimits {
+	l := catalog.DefaultDispatchLimits()
+	envInt := func(key string, cur int) int {
+		v := os.Getenv(key)
+		if v == "" {
+			return cur
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			logger.Warn("invalid dispatch limit — using default", "key", key, "value", v, "default", cur)
+			return cur
+		}
+		return n
+	}
+	l.Global = envInt("MAX_CONCURRENT_JOBS_GLOBAL", l.Global)
+	l.PerRepository = envInt("MAX_CONCURRENT_JOBS_PER_REPOSITORY", l.PerRepository)
+	l.PerAgent = envInt("MAX_CONCURRENT_JOBS_PER_AGENT", l.PerAgent)
+	return l
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -72,12 +99,12 @@ func main() {
 
 	// ── RBAC — multi-user authentication ────────────────────────────────────
 	userStore := auth.NewUserStore(db.Pool())
-	sessions  := auth.NewRBACSessionManager()
+	sessions := auth.NewRBACSessionManager()
 
 	// Bootstrap admin: if ADMIN_EMAIL + ADMIN_PASSWORD are set and no admin
 	// user exists yet, create one automatically on first startup.
 	adminEmail := os.Getenv("ADMIN_EMAIL")
-	adminPass  := os.Getenv("ADMIN_PASSWORD")
+	adminPass := os.Getenv("ADMIN_PASSWORD")
 	if adminEmail != "" && adminPass != "" {
 		if len(adminPass) < minAdminPasswordLen {
 			logger.Error("ADMIN_PASSWORD too short — minimum 10 characters")
@@ -146,7 +173,13 @@ func main() {
 		auth.NewAgentTokenStore(db),
 		auditStore,
 		logger,
-	).WithPolicyNotifier(sched).WithWebAuth(webAuth).WithRBAC(sessions, userStore).WithDBPool(db.Pool())
+	).WithPolicyNotifier(sched).WithWebAuth(webAuth).WithRBAC(sessions, userStore).WithDBPool(db.Pool()).
+		WithDispatchGuard(catalog.NewDispatchGuardWithLimits(db, dispatchLimitsFromEnv(logger)))
+	dispatchLimits := dispatchLimitsFromEnv(logger)
+	logger.Info("dispatch guard enabled (E1.1–E1.4)",
+		"max_concurrent_jobs_global", dispatchLimits.Global,
+		"max_concurrent_jobs_per_repository", dispatchLimits.PerRepository,
+		"max_concurrent_jobs_per_agent", dispatchLimits.PerAgent)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)

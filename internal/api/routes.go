@@ -77,6 +77,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/systems/{id}",    h.getSystem)
 	mux.HandleFunc("PUT /v1/systems/{id}",    requireRoleFn(auth.RoleOperator, h.updateSystem))
 	mux.HandleFunc("DELETE /v1/systems/{id}", requireRoleFn(auth.RoleAdmin, h.deleteSystem))
+	mux.HandleFunc("PUT /v1/systems/{id}/operation-state", requireRoleFn(auth.RoleOperator, h.setOperationState))
 
 	mux.HandleFunc("GET /v1/repositories",             h.listRepositories)
 	mux.HandleFunc("POST /v1/repositories",            requireRoleFn(auth.RoleOperator, h.createRepository))

@@ -176,6 +176,10 @@ func (a *Agent) executeVerifyJob(ctx context.Context, job catalog.BackupJob) {
 	}
 
 	if err := a.cp.StartJob(ctx, job.ID); err != nil {
+		if errors.Is(err, agentclient.ErrDispatchDeferred) {
+			log.Info("dispatch deferred — agent at concurrency limit; verify job stays pending")
+			return
+		}
 		log.Error("start job failed", "error", err)
 		return
 	}
@@ -299,6 +303,12 @@ func (a *Agent) executeJob(ctx context.Context, job catalog.BackupJob) {
 	}
 
 	if err := a.cp.StartJob(ctx, job.ID); err != nil {
+		if errors.Is(err, agentclient.ErrDispatchDeferred) {
+			// Not a failure: the control plane declined to start now (e.g. agent
+			// concurrency limit). Leave the job pending and retry on the next poll.
+			log.Info("dispatch deferred — agent at concurrency limit; job stays pending")
+			return
+		}
 		log.Error("mark job running failed", "error", err)
 		return
 	}

@@ -14,7 +14,12 @@ type System struct {
 	LastSeen     *time.Time
 	Tags         map[string]any
 	RiskClass    string
-	CreatedAt    time.Time
+	// OperationState is the admin-set operation state (E1.2): active | maintenance |
+	// draining | suspended. Governs whether new jobs may be dispatched. Separate
+	// from the observed (derived, non-stored) health state.
+	OperationState          string
+	OperationStateChangedAt *time.Time
+	CreatedAt               time.Time
 }
 
 // ImmutableMode documents the write-protection mechanism of a repository.
@@ -26,7 +31,7 @@ const (
 	ImmutableObjectLock ImmutableMode = "object_lock" // S3/MinIO Object Lock
 	ImmutableWORM       ImmutableMode = "worm"        // hardware/NAS WORM
 	ImmutableAppendOnly ImmutableMode = "append_only" // restic --append-only or similar
-	ImmutableUnknown    ImmutableMode = "unknown"      // not verified
+	ImmutableUnknown    ImmutableMode = "unknown"     // not verified
 )
 
 // IsProtected reports whether this mode provides any form of write protection.
@@ -48,14 +53,14 @@ type BackupRepository struct {
 // RepositoryHealth holds derived health indicators for a repository.
 // Computed on demand — never stored. Honest: no fake "healthy" without evidence.
 type RepositoryHealth struct {
-	RepositoryID       uuid.UUID
-	EncryptionEnabled  bool
-	ImmutableMode      ImmutableMode
-	SnapshotCount      int
-	VerifiedCount      int     // snapshots with successful restore test
-	LastBackupAt       *time.Time
-	LastRestoreTestAt  *time.Time
-	LastRetentionAt    *time.Time
+	RepositoryID      uuid.UUID
+	EncryptionEnabled bool
+	ImmutableMode     ImmutableMode
+	SnapshotCount     int
+	VerifiedCount     int // snapshots with successful restore test
+	LastBackupAt      *time.Time
+	LastRestoreTestAt *time.Time
+	LastRetentionAt   *time.Time
 }
 
 // RetentionPlan holds the restic-compatible keep rules for a policy.
@@ -99,7 +104,7 @@ type ScheduleConfig struct {
 
 // AdvancedConfig holds performance and auto-update settings.
 type AdvancedConfig struct {
-	BandwidthLimitKbps int  `json:"bandwidth_limit_kbps"` // 0 = unlimited
+	BandwidthLimitKbps int `json:"bandwidth_limit_kbps"` // 0 = unlimited
 }
 
 type BackupPolicy struct {
@@ -107,7 +112,7 @@ type BackupPolicy struct {
 	Name           string
 	Includes       []string
 	Excludes       []string
-	Schedule       *string       // legacy cron field — use ScheduleConfig.Cron for new code
+	Schedule       *string // legacy cron field — use ScheduleConfig.Cron for new code
 	ScheduleConfig ScheduleConfig
 	Advanced       AdvancedConfig
 	Retention      map[string]any
@@ -147,7 +152,7 @@ type BackupJob struct {
 	ID            uuid.UUID
 	SystemID      uuid.UUID
 	PolicyID      uuid.UUID
-	Type          string     // "backup" | "retention" — see JobTypeBackup / JobTypeRetention
+	Type          string // "backup" | "retention" — see JobTypeBackup / JobTypeRetention
 	StartedAt     *time.Time
 	FinishedAt    *time.Time
 	Status        string

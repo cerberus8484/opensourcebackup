@@ -28,14 +28,71 @@ func (h *Handler) listAgentJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 // startAgentJob handles PUT /v1/agent/jobs/{id}/start.
+//
+// When a dispatch guard is wired (E1.1) the pending→running transition is gated
+// by it: a BLOCKED decision (e.g. the agent is at its concurrency limit) is NOT an
+// error — the job is left pending and the agent retries on its next poll. Blocked
+// starts return HTTP 429 with a structured reason so the agent can distinguish
+// "not now" from a real failure; genuine errors keep their normal status codes.
 func (h *Handler) startAgentJob(w http.ResponseWriter, r *http.Request) {
 	job, ok := h.claimJob(w, r)
 	if !ok {
 		return
 	}
-	if err := h.jobs.StartJob(r.Context(), job.ID); err != nil {
+
+	if h.dispatch == nil {
+		// No guard configured — unguarded pending→running transition.
+		if err := h.jobs.StartJob(r.Context(), job.ID); err != nil {
+			writeError(w, httpStatusForError(err), safeErrorMessage(err))
+			return
+		}
+		writeFreshJob(w, h, r, job.ID)
+		return
+	}
+
+	decision, err := h.dispatch.AdmitStart(r.Context(), job.ID)
+	if err != nil {
 		writeError(w, httpStatusForError(err), safeErrorMessage(err))
 		return
+	}
+	if !decision.Allowed {
+		h.log.Info("job dispatch blocked",
+			"job_id", job.ID,
+			"agent_id", job.SystemID,
+			"repository_id", decision.RepositoryID,
+			"global_running", decision.GlobalRunning,
+			"global_limit", decision.GlobalLimit,
+			"repository_running", decision.RepoRunning,
+			"repository_limit", decision.RepoLimit,
+			"agent_running", decision.RunningCount,
+			"agent_limit", decision.Limit,
+			"health_state", decision.HealthState,
+			"last_seen_age_sec", decision.LastSeenAgeSec,
+			"reason", decision.Reason,
+		)
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":              "dispatch blocked",
+			"reason":             decision.Reason,
+			"status":             "pending",
+			"global_running":     decision.GlobalRunning,
+			"global_limit":       decision.GlobalLimit,
+			"repository_running": decision.RepoRunning,
+			"repository_limit":   decision.RepoLimit,
+			"agent_running":      decision.RunningCount,
+			"agent_limit":        decision.Limit,
+			"health_state":       decision.HealthState,
+		})
+		return
+	}
+	// Allowed but the agent's health is degraded — surface a warning (E1.3a). DEGRADED
+	// still dispatches; the operator sees the signal without the job being blocked.
+	if decision.HealthState == string(catalog.HealthDegraded) {
+		h.log.Warn("job dispatched to degraded agent",
+			"job_id", job.ID,
+			"agent_id", job.SystemID,
+			"health_state", decision.HealthState,
+			"last_seen_age_sec", decision.LastSeenAgeSec,
+		)
 	}
 	writeFreshJob(w, h, r, job.ID)
 }
