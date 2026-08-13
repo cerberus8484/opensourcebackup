@@ -29,36 +29,43 @@ export function DonutChart({ segments, size = 120, thickness = 18, center }: Pro
           <circle cx={size/2} cy={size/2} r={r}
             fill="none" stroke="var(--border)" strokeWidth={thickness} />
         </svg>
-        {center && <div style={centerStyle(size)}>{center}</div>}
+        {center && <div style={centerStyle()}>{center}</div>}
       </div>
     )
   }
 
-  let offset = 0
   const gap   = total > 0 ? Math.min(circ * 0.01, 2) : 0
+  const segmentsWithOffset = segments.filter(segment => segment.value > 0).reduce<Array<Segment & { offset: number }>>(
+    (result, segment) => {
+      const offset = result.length === 0
+        ? 0
+        : result[result.length - 1].offset + (result[result.length - 1].value / total) * circ
+      result.push({ ...segment, offset })
+      return result
+    },
+    [],
+  )
 
   return (
     <div style={{ ...container(size), position: 'relative' }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-        {segments.filter(s => s.value > 0).map((seg, i) => {
+        {segmentsWithOffset.map((seg, i) => {
           const dash  = (seg.value / total) * circ - gap
           const space = circ - dash
-          const el = (
+          return (
             <circle key={i}
               cx={size/2} cy={size/2} r={r}
               fill="none"
               stroke={seg.color}
               strokeWidth={thickness}
               strokeDasharray={`${dash} ${space}`}
-              strokeDashoffset={-offset}
+              strokeDashoffset={-seg.offset}
               strokeLinecap="butt"
             />
           )
-          offset += (seg.value / total) * circ
-          return el
         })}
       </svg>
-      {center && <div style={centerStyle(size)}>{center}</div>}
+      {center && <div style={centerStyle()}>{center}</div>}
     </div>
   )
 }
@@ -67,7 +74,7 @@ function container(size: number): CSSProperties {
   return { width: size, height: size, flexShrink: 0 }
 }
 
-function centerStyle(_size: number): CSSProperties {
+function centerStyle(): CSSProperties {
   return {
     position: 'absolute', inset: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',

@@ -1,5 +1,6 @@
 # Binaries
 /bin/
+opensourcebackup-agent-*
 *.exe
 *.exe~
 *.dll
@@ -32,6 +33,10 @@ dist/
 bin/
 osb-server-linux
 osb-server-*
+ChatGPT Image*.png
+
+# Local verification scratch output — reproducible E2E evidence belongs in a dedicated test harness, not here.
+docs/agent-runs/
 
 # Interne Sicherheitsdokumentation — nicht öffentlich
 docs/security/

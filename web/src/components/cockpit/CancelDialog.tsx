@@ -8,6 +8,8 @@ export interface CancelTarget {
   policy: BackupPolicy | null
 }
 
+// Shared dialog options; this module also exports the component below.
+// eslint-disable-next-line react-refresh/only-export-components
 export const CANCEL_REASONS = ['Windows-Update', 'Maschine instabil', 'Arbeitsbetrieb', 'Sonstiges']
 
 interface CancelDialogProps {

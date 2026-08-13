@@ -25,8 +25,6 @@ export function RepositoryHealthTable({ repos, health }: Props) {
           {repos.map(repo => {
             const h = health.find(x => x.RepositoryID === repo.ID)
             const imm = repo.ImmutableMode ?? 'none'
-            const health_ok = imm !== 'none' && (repo.EncryptionMode ?? '') !== ''
-            const health_warn = imm === 'none' || (repo.EncryptionMode ?? '') === ''
             const verifiedPct = h && h.SnapshotCount > 0 ? Math.round(h.VerifiedCount / h.SnapshotCount * 100) : 0
 
             return (
@@ -56,7 +54,6 @@ export function RepositoryHealthTable({ repos, health }: Props) {
                 <td style={s.td}><span style={s.age}>{timeAgo(h?.LastRestoreTestAt)}</span></td>
               </tr>
             )
-            void health_ok; void health_warn
           })}
         </tbody>
       </table>

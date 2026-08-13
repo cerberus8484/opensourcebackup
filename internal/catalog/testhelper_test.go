@@ -4,10 +4,20 @@ package catalog_test
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"os"
+	"sync"
 	"testing"
 
+	root "github.com/cerberus8484/opensourcebackup"
 	"github.com/cerberus8484/opensourcebackup/internal/catalog"
+	"github.com/cerberus8484/opensourcebackup/internal/migrate"
+)
+
+var (
+	migrateOnce sync.Once
+	migrateErr  error
 )
 
 func newTestDB(t *testing.T) *catalog.DB {
@@ -15,6 +25,15 @@ func newTestDB(t *testing.T) *catalog.DB {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		t.Skip("DATABASE_URL not set — skipping integration test")
+	}
+	migrateOnce.Do(func() {
+		migrateErr = migrate.Run(
+			context.Background(), dsn, root.MigrationsFS,
+			slog.New(slog.NewTextHandler(io.Discard, nil)),
+		)
+	})
+	if migrateErr != nil {
+		t.Fatalf("migrate integration database: %v", migrateErr)
 	}
 	db, err := catalog.Open(context.Background(), dsn)
 	if err != nil {

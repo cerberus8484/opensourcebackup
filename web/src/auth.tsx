@@ -24,4 +24,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={state}>{children}</AuthContext.Provider>
 }
 
+// The hook is intentionally colocated with its provider; this module is not hot-reloaded as a component boundary.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() { return useContext(AuthContext) }

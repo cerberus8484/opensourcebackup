@@ -12,6 +12,8 @@ export interface ScheduleConfig {
   retention_cron:    string
 }
 
+// Shared form default; this module also exports the component below.
+// eslint-disable-next-line react-refresh/only-export-components
 export const EMPTY_SCHEDULE: ScheduleConfig = {
   cron: '', timezone: 'Europe/Berlin',
   window_start: '', window_end: '',
