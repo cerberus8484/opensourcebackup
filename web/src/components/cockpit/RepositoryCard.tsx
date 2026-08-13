@@ -15,8 +15,8 @@ interface RepositoryCardProps {
 }
 
 export function RepositoryCard({ repo, lastSuccess, onDetails }: RepositoryCardProps) {
-  const encrypted = !!repo.EncryptionMode && repo.EncryptionMode !== 'none'
-  const immutable = repo.ImmutableMode !== 'none' && repo.ImmutableMode !== 'unknown'
+  const encrypted = !!repo.EncryptionMode && repo.EncryptionMode !== 'none' && repo.SecurityPosture?.Encryption === 'VERIFIED'
+  const immutable = repo.ImmutableMode !== 'none' && repo.ImmutableMode !== 'unknown' && repo.SecurityPosture?.Immutability === 'VERIFIED'
 
   return (
     <div style={s.card}>

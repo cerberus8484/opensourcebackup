@@ -10,7 +10,8 @@ import (
 )
 
 const repoSelect = `
-	SELECT id, type, location, encryption_mode, object_lock_enabled, immutable_mode, retention_policy_id, created_at
+	SELECT id, type, location, backend_type, management_mode, encryption_mode, object_lock_enabled, immutable_mode,
+	       encryption_posture, object_lock_posture, immutability_posture, retention_policy_id, created_at
 	FROM repositories`
 
 // RepositoryStore defines data access for the repositories table.
@@ -40,12 +41,20 @@ func (s *pgRepositoryStore) Create(ctx context.Context, r *BackupRepository) err
 			mode = ImmutableNone
 		}
 	}
+	r.ImmutableMode = mode
+	r.BackendType = ClassifyRepositoryBackend(r.Type, r.Location)
+	if r.ManagementMode == "" {
+		r.ManagementMode = RepositoryManagementLegacy
+	}
+	r.SecurityPosture = DeclaredSecurityPosture(r)
 	row := s.db.pool.QueryRow(ctx, `
 		INSERT INTO repositories
-		  (type, location, encryption_mode, object_lock_enabled, immutable_mode, retention_policy_id)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		  (type, location, backend_type, management_mode, encryption_mode, object_lock_enabled, immutable_mode,
+		   encryption_posture, object_lock_posture, immutability_posture, retention_policy_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		RETURNING id, created_at`,
-		r.Type, r.Location, r.EncryptionMode, r.ObjectLockEnabled, string(mode),
+		r.Type, r.Location, string(r.BackendType), string(r.ManagementMode), r.EncryptionMode, r.ObjectLockEnabled, string(mode),
+		string(r.SecurityPosture.Encryption), string(r.SecurityPosture.ObjectLock), string(r.SecurityPosture.Immutability),
 		uuidPtrToRaw(r.RetentionPolicyID),
 	)
 	var rawID pgtype.UUID
@@ -53,7 +62,6 @@ func (s *pgRepositoryStore) Create(ctx context.Context, r *BackupRepository) err
 		return err
 	}
 	r.ID = uuid.UUID(rawID.Bytes)
-	r.ImmutableMode = mode
 	return nil
 }
 
@@ -92,13 +100,19 @@ func (s *pgRepositoryStore) Update(ctx context.Context, r *BackupRepository) err
 	if mode == "" {
 		mode = ImmutableNone
 	}
+	r.ImmutableMode = mode
+	r.BackendType = ClassifyRepositoryBackend(r.Type, r.Location)
+	if r.ManagementMode == "" {
+		r.ManagementMode = RepositoryManagementLegacy
+	}
+	r.SecurityPosture = DeclaredSecurityPosture(r)
 	tag, err := s.db.pool.Exec(ctx, `
 		UPDATE repositories
-		SET type=$1, location=$2, encryption_mode=$3, object_lock_enabled=$4,
-		    immutable_mode=$5, retention_policy_id=$6
-		WHERE id=$7`,
-		r.Type, r.Location, r.EncryptionMode, r.ObjectLockEnabled,
-		string(mode), uuidPtrToRaw(r.RetentionPolicyID),
+		SET type=$1, location=$2, backend_type=$3, management_mode=$4, encryption_mode=$5, object_lock_enabled=$6,
+		    immutable_mode=$7, encryption_posture=$8, object_lock_posture=$9, immutability_posture=$10, retention_policy_id=$11
+		WHERE id=$12`,
+		r.Type, r.Location, string(r.BackendType), string(r.ManagementMode), r.EncryptionMode, r.ObjectLockEnabled,
+		string(mode), string(r.SecurityPosture.Encryption), string(r.SecurityPosture.ObjectLock), string(r.SecurityPosture.Immutability), uuidPtrToRaw(r.RetentionPolicyID),
 		pgtype.UUID{Bytes: r.ID, Valid: true},
 	)
 	if err != nil {
@@ -125,19 +139,22 @@ func (s *pgRepositoryStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 func scanRepository(row rowScanner) (*BackupRepository, error) {
 	var (
-		r        BackupRepository
-		rawID    pgtype.UUID
-		rawRetID pgtype.UUID
-		mode     string
+		r                                                                                            BackupRepository
+		rawID                                                                                        pgtype.UUID
+		rawRetID                                                                                     pgtype.UUID
+		backendType, managementMode, mode, encryptionPosture, objectLockPosture, immutabilityPosture string
 	)
 	if err := row.Scan(
-		&rawID, &r.Type, &r.Location, &r.EncryptionMode,
-		&r.ObjectLockEnabled, &mode, &rawRetID, &r.CreatedAt,
+		&rawID, &r.Type, &r.Location, &backendType, &managementMode, &r.EncryptionMode,
+		&r.ObjectLockEnabled, &mode, &encryptionPosture, &objectLockPosture, &immutabilityPosture, &rawRetID, &r.CreatedAt,
 	); err != nil {
 		return nil, err
 	}
 	r.ID = uuid.UUID(rawID.Bytes)
+	r.BackendType = RepositoryBackendType(backendType)
+	r.ManagementMode = RepositoryManagementMode(managementMode)
 	r.ImmutableMode = ImmutableMode(mode)
+	r.SecurityPosture = RepositorySecurityPosture{Encryption: SecurityProvenance(encryptionPosture), ObjectLock: SecurityProvenance(objectLockPosture), Immutability: SecurityProvenance(immutabilityPosture)}
 	if rawRetID.Valid {
 		id := uuid.UUID(rawRetID.Bytes)
 		r.RetentionPolicyID = &id

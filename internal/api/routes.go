@@ -84,6 +84,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/repositories/health",      h.handleListRepositoryHealth)
 	mux.HandleFunc("GET /v1/repositories/{id}",        h.getRepository)
 	mux.HandleFunc("GET /v1/repositories/{id}/health", h.handleRepositoryHealth)
+	// Credential references can reveal secret-provider topology. They are admin-only
+	// and are deliberately kept out of ordinary repository responses.
+	mux.HandleFunc("GET /v1/repositories/{id}/credential-references", requireRoleFn(auth.RoleAdmin, h.listRepositoryCredentialReferences))
+	mux.HandleFunc("POST /v1/repositories/{id}/credential-references", requireRoleFn(auth.RoleAdmin, h.createRepositoryCredentialReference))
+	mux.HandleFunc("DELETE /v1/repositories/{id}/credential-references/{credentialID}", requireRoleFn(auth.RoleAdmin, h.deleteRepositoryCredentialReference))
 	mux.HandleFunc("PUT /v1/repositories/{id}",        requireRoleFn(auth.RoleAdmin, h.updateRepository))    // admin: immutable_mode
 	mux.HandleFunc("DELETE /v1/repositories/{id}",     requireRoleFn(auth.RoleAdmin, h.deleteRepository))
 

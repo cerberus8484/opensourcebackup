@@ -38,6 +38,10 @@ func (h *Handler) createRepository(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "location is required")
 		return
 	}
+	if repo.ManagementMode != "" && repo.ManagementMode != catalog.RepositoryManagementLegacy && repo.ManagementMode != catalog.RepositoryManagementManaged {
+		writeError(w, http.StatusBadRequest, "invalid management mode")
+		return
+	}
 	if err := h.repositories.Create(r.Context(), &repo); err != nil {
 		h.log.Error("create repository", "error", err)
 		writeError(w, httpStatusForError(err), safeErrorMessage(err))
@@ -80,6 +84,10 @@ func (h *Handler) updateRepository(w http.ResponseWriter, r *http.Request) {
 	var repo catalog.BackupRepository
 	if err := decode(r, &repo); err != nil {
 		handleDecodeError(w, err)
+		return
+	}
+	if repo.ManagementMode != "" && repo.ManagementMode != catalog.RepositoryManagementLegacy && repo.ManagementMode != catalog.RepositoryManagementManaged {
+		writeError(w, http.StatusBadRequest, "invalid management mode")
 		return
 	}
 	repo.ID = id

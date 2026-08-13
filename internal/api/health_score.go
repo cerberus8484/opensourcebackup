@@ -19,12 +19,12 @@ func (h *Handler) handleHealthScore(w http.ResponseWriter, r *http.Request) {
 func computeScore(ctx context.Context, h *Handler) health.ScoreResult {
 	now := time.Now()
 
-	systems, _   := h.systems.List(ctx)
-	jobs, _       := h.jobs.List(ctx)
-	snapshots, _  := h.snapshots.List(ctx)
-	rts, _        := h.restoreTests.List(ctx)
-	repos, _      := h.repositories.List(ctx)
-	policies, _   := h.policies.List(ctx)
+	systems, _ := h.systems.List(ctx)
+	jobs, _ := h.jobs.List(ctx)
+	snapshots, _ := h.snapshots.List(ctx)
+	rts, _ := h.restoreTests.List(ctx)
+	repos, _ := h.repositories.List(ctx)
+	policies, _ := h.policies.List(ctx)
 
 	// ── Agent status ──────────────────────────────────────────────────────────
 	online, idle, offline := 0, 0, 0
@@ -75,10 +75,10 @@ func computeScore(ctx context.Context, h *Handler) health.ScoreResult {
 	// ── Repository security ───────────────────────────────────────────────────
 	unprotected, unencrypted := 0, 0
 	for _, repo := range repos {
-		if !repo.ImmutableMode.IsProtected() {
+		if repo.SecurityPosture.Immutability != catalog.SecurityProvenanceVerified {
 			unprotected++
 		}
-		if repo.EncryptionMode == nil || *repo.EncryptionMode == "" {
+		if repo.SecurityPosture.Encryption != catalog.SecurityProvenanceVerified {
 			unencrypted++
 		}
 	}

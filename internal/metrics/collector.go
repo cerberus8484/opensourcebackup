@@ -21,9 +21,9 @@ import (
 // Thresholds for agent online/idle/offline classification.
 // Must match the identical thresholds in the web dashboard (Dashboard.tsx).
 const (
-	onlineThreshold  = 2 * time.Minute
-	idleThreshold    = 15 * time.Minute
-	scrapeTimeout    = 10 * time.Second
+	onlineThreshold = 2 * time.Minute
+	idleThreshold   = 15 * time.Minute
+	scrapeTimeout   = 10 * time.Second
 )
 
 // Stores is the set of read-only data sources the collector needs.
@@ -177,8 +177,8 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		}
 	}
 	ch <- prometheus.MustNewConstMetric(c.systemsTotal, prometheus.GaugeValue, float64(len(systems)))
-	ch <- prometheus.MustNewConstMetric(c.agentsOnline,  prometheus.GaugeValue, float64(online))
-	ch <- prometheus.MustNewConstMetric(c.agentsIdle,    prometheus.GaugeValue, float64(idle))
+	ch <- prometheus.MustNewConstMetric(c.agentsOnline, prometheus.GaugeValue, float64(online))
+	ch <- prometheus.MustNewConstMetric(c.agentsIdle, prometheus.GaugeValue, float64(idle))
 	ch <- prometheus.MustNewConstMetric(c.agentsOffline, prometheus.GaugeValue, float64(offline))
 
 	// ── Jobs ──────────────────────────────────────────────────────────────────
@@ -188,9 +188,9 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		errors++
 		jobs = nil
 	}
-	jobCounts     := countByStatus(jobs, func(j catalog.BackupJob) string { return j.Status })
-	cutoff24h     := now.Add(-24 * time.Hour)
-	job24hCounts  := make(map[string]int)
+	jobCounts := countByStatus(jobs, func(j catalog.BackupJob) string { return j.Status })
+	cutoff24h := now.Add(-24 * time.Hour)
+	job24hCounts := make(map[string]int)
 	for _, j := range jobs {
 		if j.CreatedAt.After(cutoff24h) {
 			job24hCounts[j.Status]++
@@ -234,7 +234,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 			}
 		}
 	}
-	ch <- prometheus.MustNewConstMetric(c.snapshotsTotal,    prometheus.GaugeValue, float64(len(snapshots)))
+	ch <- prometheus.MustNewConstMetric(c.snapshotsTotal, prometheus.GaugeValue, float64(len(snapshots)))
 	ch <- prometheus.MustNewConstMetric(c.snapshotsVerified, prometheus.GaugeValue, float64(verifiedCount))
 
 	verifiedRatio := 0.0
@@ -270,7 +270,9 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	// Re-count verified with dedup
 	verifiedDedup := 0
 	snapIDMap := make(map[string]bool, len(snapshots))
-	for _, sn := range snapshots { snapIDMap[sn.ID.String()] = true }
+	for _, sn := range snapshots {
+		snapIDMap[sn.ID.String()] = true
+	}
 	seen := make(map[string]bool)
 	for _, rt := range allRTs {
 		if rt.Status == "success" && snapIDMap[rt.SnapshotID.String()] && !seen[rt.SnapshotID.String()] {
@@ -282,14 +284,20 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	repos, _ := c.stores.Repositories.List(ctx)
 	unprotected, unencrypted := 0, 0
 	for _, repo := range repos {
-		if !repo.ImmutableMode.IsProtected() { unprotected++ }
-		if repo.EncryptionMode == nil || *repo.EncryptionMode == "" { unencrypted++ }
+		if repo.SecurityPosture.Immutability != catalog.SecurityProvenanceVerified {
+			unprotected++
+		}
+		if repo.SecurityPosture.Encryption != catalog.SecurityProvenanceVerified {
+			unencrypted++
+		}
 	}
 	// Load policies for retention check
 	policies, _ := c.stores.Policies.List(ctx)
 	policiesWithRetention := 0
 	for _, p := range policies {
-		if p.RetentionPlan.HasRules() { policiesWithRetention++ }
+		if p.RetentionPlan.HasRules() {
+			policiesWithRetention++
+		}
 	}
 	healthInput := apphealth.Input{
 		TotalSystems:          len(systems),
@@ -340,7 +348,8 @@ func agentStatus(lastSeen *time.Time, now time.Time) string {
 // MUST stay in sync with the TypeScript implementation in Dashboard.tsx.
 //
 // Maximum total deduction with the current formula:
-//   -30 (no restore tests) + -20 (failed 24h) + -10 (failure rate) = -60 → minimum score = 40
+//
+//	-30 (no restore tests) + -20 (failed 24h) + -10 (failure rate) = -60 → minimum score = 40
 //
 // The score floor at 0 is a safety guard for future formula extensions.
 // If the formula is extended with additional deductions, the floor prevents negative values.

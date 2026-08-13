@@ -35,22 +35,30 @@ var ErrBodyTooLarge = errors.New("request body too large")
 
 // Handler holds all store dependencies for the HTTP API.
 type Handler struct {
-	systems          catalog.SystemStore
-	repositories     catalog.RepositoryStore
-	policies         catalog.PolicyStore
-	jobs             catalog.JobStore
-	snapshots        catalog.SnapshotStore
-	restoreTests     catalog.RestoreTestStore
-	enrollmentTokens auth.EnrollmentTokenStore
-	agentTokens      auth.AgentTokenStore
-	policyNotifier   PolicyChangeNotifier     // may be nil
-	webAuth          *auth.WebAuthenticator   // legacy single-password (fallback)
-	sessions         *auth.RBACSessionManager // multi-user sessions; nil = legacy mode
-	users            auth.UserStore           // nil = legacy single-password mode
-	auditStore       audit.Store
-	dbPool           *pgxpool.Pool    // for direct DB operations (notifications etc.)
-	dispatch         DispatchAdmitter // E1.1 dispatch guard; nil = unguarded start
-	log              *slog.Logger
+	systems              catalog.SystemStore
+	repositories         catalog.RepositoryStore
+	credentialReferences catalog.RepositoryCredentialReferenceStore
+	policies             catalog.PolicyStore
+	jobs                 catalog.JobStore
+	snapshots            catalog.SnapshotStore
+	restoreTests         catalog.RestoreTestStore
+	enrollmentTokens     auth.EnrollmentTokenStore
+	agentTokens          auth.AgentTokenStore
+	policyNotifier       PolicyChangeNotifier     // may be nil
+	webAuth              *auth.WebAuthenticator   // legacy single-password (fallback)
+	sessions             *auth.RBACSessionManager // multi-user sessions; nil = legacy mode
+	users                auth.UserStore           // nil = legacy single-password mode
+	auditStore           audit.Store
+	dbPool               *pgxpool.Pool    // for direct DB operations (notifications etc.)
+	dispatch             DispatchAdmitter // E1.1 dispatch guard; nil = unguarded start
+	log                  *slog.Logger
+}
+
+// WithRepositoryCredentialReferenceStore wires metadata-only credential
+// references. Keeping it optional preserves compatibility for test harnesses.
+func (h *Handler) WithRepositoryCredentialReferenceStore(store catalog.RepositoryCredentialReferenceStore) *Handler {
+	h.credentialReferences = store
+	return h
 }
 
 // New creates a Handler wired to the given stores.

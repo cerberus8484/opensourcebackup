@@ -173,7 +173,7 @@ func main() {
 		auth.NewAgentTokenStore(db),
 		auditStore,
 		logger,
-	).WithPolicyNotifier(sched).WithWebAuth(webAuth).WithRBAC(sessions, userStore).WithDBPool(db.Pool()).
+	).WithRepositoryCredentialReferenceStore(catalog.NewRepositoryCredentialReferenceStore(db)).WithPolicyNotifier(sched).WithWebAuth(webAuth).WithRBAC(sessions, userStore).WithDBPool(db.Pool()).
 		WithDispatchGuard(catalog.NewDispatchGuardWithLimits(db, dispatchLimitsFromEnv(logger)))
 	dispatchLimits := dispatchLimitsFromEnv(logger)
 	logger.Info("dispatch guard enabled (E1.1–E1.4)",

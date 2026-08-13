@@ -33,9 +33,9 @@ export function RepositoryHealthTable({ repos, health }: Props) {
                   <div style={s.repoName}>{repo.Location.length > 28 ? '…' + repo.Location.slice(-26) : repo.Location}</div>
                 </td>
                 <td style={s.td}><TypeBadge type={repo.Type} /></td>
-                <td style={s.td}><ImmBadge mode={imm} /></td>
+                <td style={s.td}><ImmBadge mode={imm} verified={repo.SecurityPosture?.Immutability === 'VERIFIED'} /></td>
                 <td style={s.td}>
-                  {repo.EncryptionMode
+                  {repo.EncryptionMode && repo.SecurityPosture?.Encryption === 'VERIFIED'
                     ? <span style={{ color:'var(--success)', fontSize:11 }}>✓ {repo.EncryptionMode}</span>
                     : <span style={{ color:'var(--warning)', fontSize:11 }}>⚠ Off</span>}
                 </td>
@@ -65,7 +65,7 @@ function TypeBadge({ type }: { type: string }) {
   return <span style={{ fontSize:10, padding:'2px 6px', borderRadius:4, background:'rgba(56,189,248,0.1)', color:'var(--accent-blue)', fontWeight:600 }}>{type}</span>
 }
 
-function ImmBadge({ mode }: { mode: string }) {
+function ImmBadge({ mode, verified }: { mode: string; verified: boolean }) {
   const cfg: Record<string,{c:string,l:string}> = {
     object_lock: {c:'var(--success)',l:'🔒 Object Lock'},
     worm:        {c:'var(--success)',l:'🔒 WORM'},
@@ -74,7 +74,7 @@ function ImmBadge({ mode }: { mode: string }) {
     none:        {c:'var(--text-dim)',l:'— None'},
   }
   const {c,l} = cfg[mode] ?? cfg.none
-  return <span style={{ fontSize:10, color:c, fontWeight:500 }}>{l}</span>
+  return <span style={{ fontSize:10, color: verified ? c : 'var(--warning)', fontWeight:500 }}>{l}{mode !== 'none' && ` (${verified ? 'verified' : 'declared'})`}</span>
 }
 
 const s: Record<string, React.CSSProperties> = {
