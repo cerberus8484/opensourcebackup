@@ -25,11 +25,11 @@ function typeLabel(t: string): { label: string; icon: string } {
   return MAP[t] ?? { label: t, icon: '📦' }
 }
 
-function immLabel(mode: string): { text: string; color: string } {
+function immLabel(mode: string, verified: boolean): { text: string; color: string } {
   switch (mode) {
-    case 'object_lock': return { text: '🔒 Object Lock', color: 'var(--success)' }
-    case 'worm':        return { text: '🔒 WORM',        color: 'var(--success)' }
-    case 'append_only': return { text: '📎 Append-Only', color: 'var(--accent-teal)' }
+    case 'object_lock': return { text: `🔒 Object Lock (${verified ? 'verified' : 'declared'})`, color: verified ? 'var(--success)' : 'var(--warning)' }
+    case 'worm':        return { text: `🔒 WORM (${verified ? 'verified' : 'declared'})`, color: verified ? 'var(--success)' : 'var(--warning)' }
+    case 'append_only': return { text: `📎 Append-Only (${verified ? 'verified' : 'declared'})`, color: verified ? 'var(--accent-teal)' : 'var(--warning)' }
     case 'unknown':     return { text: '? Unknown',      color: 'var(--warning)' }
     default:            return { text: '— Disabled',     color: 'var(--text-dim)' }
   }
@@ -92,7 +92,7 @@ export function RepositoriesTable({ repos, health, onNew }: Props) {
                 const { name, sub } = repoDisplayName(repo)
                 const { icon } = typeLabel(repo.Type)
                 const { region, sub: rsub } = repoRegion(repo)
-                const imm     = immLabel(repo.ImmutableMode)
+                const imm     = immLabel(repo.ImmutableMode, repo.SecurityPosture?.Immutability === 'VERIFIED')
                 const vPct    = h && h.SnapshotCount > 0
                   ? Math.round(h.VerifiedCount / h.SnapshotCount * 100)
                   : null
@@ -123,7 +123,7 @@ export function RepositoriesTable({ repos, health, onNew }: Props) {
 
                     {/* Encryption */}
                     <td style={s.td}>
-                      {repo.EncryptionMode
+                      {repo.EncryptionMode && repo.SecurityPosture?.Encryption === 'VERIFIED'
                         ? <span style={{ color: 'var(--success)', fontSize: 11, fontWeight: 600 }}>✓ {repo.EncryptionMode}</span>
                         : <span style={{ color: 'var(--warning)', fontSize: 11 }}>⚠ Off</span>}
                     </td>

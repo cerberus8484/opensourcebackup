@@ -55,8 +55,29 @@ export interface System {
   LastSeen?: string; RiskClass: string; Tags?: Record<string,string>; CreatedAt: string
 }
 export type ImmutableMode = 'none' | 'object_lock' | 'worm' | 'append_only' | 'unknown'
+export type RepositoryBackendType = 'REST_SERVER' | 'S3' | 'MINIO' | 'FILESYSTEM' | 'UNKNOWN'
+export type RepositoryManagementMode = 'LEGACY' | 'MANAGED'
+export type SecurityProvenance = 'UNKNOWN' | 'DECLARED' | 'DISCOVERED' | 'VERIFIED'
+export interface RepositorySecurityPosture {
+  Encryption: SecurityProvenance; ObjectLock: SecurityProvenance; Immutability: SecurityProvenance
+}
+export type CredentialPurpose = 'BACKUP_WRITE' | 'RESTORE_READ' | 'RETENTION' | 'REPOSITORY_ADMIN'
+export interface RepositoryCredentialReference {
+  ID: string; RepositoryID: string; Purpose: CredentialPurpose; ProviderType: string; Reference: string
+  Status: 'ACTIVE' | 'DISABLED' | 'REVOKED'; CreatedAt: string; UpdatedAt: string
+}
 
 export interface ActivityBucket { hour: string; backups: number; restore_tests: number; failures: number; bytes_added?: number }
+export interface HealthAlert {
+  code: string; severity: 'critical' | 'warning' | 'info'; category: string
+  title: string; description: string; points: number; action: string
+}
+export interface HealthAlertSummary { total: number; critical: number; warning: number; info: number }
+export interface AuditEntry {
+  ID: number; Timestamp: string; Action: string; ResourceType: string; ResourceID: string
+  ActorType: string; Actor: string; IP: string; Details: string
+  Severity: 'info' | 'warning' | 'critical'; Success: boolean
+}
 export interface ScoreDeduction { points: number; code: string; reason: string }
 export interface HealthScore {
   score:      number
@@ -69,8 +90,9 @@ export interface HealthScore {
 
 export interface BackupRepository {
   ID: string; Type: string; Location: string
+  BackendType: RepositoryBackendType; ManagementMode: RepositoryManagementMode
   EncryptionMode?: string; ObjectLockEnabled: boolean
-  ImmutableMode: ImmutableMode; CreatedAt: string
+  ImmutableMode: ImmutableMode; SecurityPosture: RepositorySecurityPosture; CreatedAt: string
 }
 
 export interface RepositoryHealth {
@@ -146,10 +168,11 @@ export const api = {
   healthActivity:      (hours = 24) => get<ActivityBucket[]>(`/v1/health/activity?hours=${hours}`),
   healthActivityDays:  (days: number) => get<ActivityBucket[]>(`/v1/health/activity?days=${days}`),
   healthActivityWeeks: (weeks: number) => get<ActivityBucket[]>(`/v1/health/activity?weeks=${weeks}`),
-  healthAlerts:        () => get<{ alerts: any[]; summary: any }>('/v1/health/alerts'),
-  auditLog:            (limit = 5) => get<any[]>(`/v1/audit?limit=${limit}`),
+  healthAlerts:        () => get<{ alerts: HealthAlert[]; summary: HealthAlertSummary }>('/v1/health/alerts'),
+  auditLog:            (limit = 5) => get<AuditEntry[]>(`/v1/audit?limit=${limit}`),
   createRepository:    (r: Partial<BackupRepository> & { ImmutableMode?: ImmutableMode }) => post<BackupRepository>('/v1/repositories', r),
   deleteRepository:    (id: string) => del(`/v1/repositories/${id}`),
+  repositoryCredentialReferences: (id: string) => get<RepositoryCredentialReference[]>(`/v1/repositories/${id}/credential-references`),
   policies:      () => get<BackupPolicy[]>('/v1/policies'),
   createPolicy:  (p: Partial<BackupPolicy>) => post<BackupPolicy>('/v1/policies', p),
   updatePolicy:  (id: string, p: Partial<BackupPolicy>) => put<BackupPolicy>(`/v1/policies/${id}`, p),

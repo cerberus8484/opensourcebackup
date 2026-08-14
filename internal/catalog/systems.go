@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,11 @@ type SystemStore interface {
 	// Consistency across DB / Go model (LastSeen) / JSON (LastSeen) / React (LastSeen) is maintained.
 	// If renamed in future: migration 000014 + update all four layers together.
 	UpdateLastSeen(ctx context.Context, id uuid.UUID, seenAt time.Time) error
+	// SetOperationState changes the system's operation state (E1.2) and returns the
+	// previous state, atomically (SELECT … FOR UPDATE + UPDATE in one transaction).
+	// Returns ErrNotFound if the system does not exist. Does NOT touch last_seen or
+	// any job — operation state and health/jobs are independent dimensions.
+	SetOperationState(ctx context.Context, id uuid.UUID, newState string) (oldState string, err error)
 }
 
 type pgSystemStore struct {
@@ -54,12 +60,17 @@ func (r *pgSystemStore) Create(ctx context.Context, s *System) error {
 		return err
 	}
 	s.ID = uuid.UUID(rawID.Bytes)
+	// New systems default to ACTIVE (DB default) — reflect that in the returned model.
+	if s.OperationState == "" {
+		s.OperationState = string(OperationActive)
+	}
 	return nil
 }
 
 func (r *pgSystemStore) GetByID(ctx context.Context, id uuid.UUID) (*System, error) {
 	row := r.db.pool.QueryRow(ctx, `
-		SELECT id, hostname, os, agent_version, last_seen, tags, risk_class, created_at
+		SELECT id, hostname, os, agent_version, last_seen, tags, risk_class,
+		       operation_state, operation_state_changed_at, created_at
 		FROM systems WHERE id = $1`,
 		pgtype.UUID{Bytes: id, Valid: true},
 	)
@@ -72,7 +83,8 @@ func (r *pgSystemStore) GetByID(ctx context.Context, id uuid.UUID) (*System, err
 
 func (r *pgSystemStore) List(ctx context.Context) ([]System, error) {
 	rows, err := r.db.pool.Query(ctx, `
-		SELECT id, hostname, os, agent_version, last_seen, tags, risk_class, created_at
+		SELECT id, hostname, os, agent_version, last_seen, tags, risk_class,
+		       operation_state, operation_state_changed_at, created_at
 		FROM systems ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -138,6 +150,41 @@ func (r *pgSystemStore) UpdateLastSeen(ctx context.Context, id uuid.UUID, seenAt
 	return nil
 }
 
+// SetOperationState changes operation_state and returns the previous value.
+// The read-then-write runs in one transaction with FOR UPDATE, so concurrent
+// changes serialize and the returned oldState is always consistent with the write
+// (important for a correct old→new audit record). It touches only the systems row.
+func (r *pgSystemStore) SetOperationState(ctx context.Context, id uuid.UUID, newState string) (string, error) {
+	tx, err := r.db.pool.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("set operation state: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after a successful commit is a no-op
+
+	var oldState string
+	err = tx.QueryRow(ctx,
+		`SELECT operation_state FROM systems WHERE id=$1 FOR UPDATE`,
+		pgtype.UUID{Bytes: id, Valid: true},
+	).Scan(&oldState)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("set operation state: load: %w", err)
+	}
+
+	if _, err = tx.Exec(ctx,
+		`UPDATE systems SET operation_state=$2, operation_state_changed_at=NOW() WHERE id=$1`,
+		pgtype.UUID{Bytes: id, Valid: true}, newState,
+	); err != nil {
+		return "", fmt.Errorf("set operation state: update: %w", err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("set operation state: commit: %w", err)
+	}
+	return oldState, nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -150,7 +197,8 @@ func scanSystem(row rowScanner) (*System, error) {
 	)
 	if err := row.Scan(
 		&rawID, &s.Hostname, &s.OS, &s.AgentVersion,
-		&s.LastSeen, &tagsRaw, &s.RiskClass, &s.CreatedAt,
+		&s.LastSeen, &tagsRaw, &s.RiskClass,
+		&s.OperationState, &s.OperationStateChangedAt, &s.CreatedAt,
 	); err != nil {
 		return nil, err
 	}

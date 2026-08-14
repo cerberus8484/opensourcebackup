@@ -126,6 +126,16 @@ func (s *stubSystemStore) UpdateLastSeen(_ context.Context, id uuid.UUID, _ time
 	return nil
 }
 
+func (s *stubSystemStore) SetOperationState(_ context.Context, id uuid.UUID, newState string) (string, error) {
+	sys, ok := s.systems[id]
+	if !ok {
+		return "", catalog.ErrNotFound
+	}
+	old := sys.OperationState
+	sys.OperationState = newState
+	return old, nil
+}
+
 // stubRepositoryStore is an in-memory RepositoryStore for unit tests.
 type stubRepositoryStore struct {
 	repos map[uuid.UUID]*catalog.BackupRepository
@@ -284,6 +294,7 @@ func (s *stubJobStore) RequestCancel(_ context.Context, id uuid.UUID, reason str
 func (s *stubJobStore) FailStaleJobs(_ context.Context, _, _, _ time.Duration) (int, error) {
 	return 0, nil
 }
+
 // transition mirrors the real guarded store: only from the allowed source state,
 // otherwise ErrIllegalTransition (or ErrNotFound). Keeps handler tests faithful.
 func (s *stubJobStore) transition(id uuid.UUID, from string, mutate func(*catalog.BackupJob)) error {

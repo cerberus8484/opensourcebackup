@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   api, timeAgo, duration,
   type BackupJob, type RestoreTest, type Snapshot, type System,
-  type BackupRepository, type RepositoryHealth, type HealthScore, type ActivityBucket
+  type BackupRepository, type RepositoryHealth, type HealthScore, type ActivityBucket, type AuditEntry, type HealthAlert
 } from '../api'
 import { Topbar }                   from '../components/Topbar'
 import { KpiCard }                  from '../components/dashboard/KpiCard'
@@ -27,8 +27,8 @@ export function Dashboard() {
   const [healthScore,  setHealthScore]  = useState<HealthScore|null>(null)
   const [activity,     setActivity]     = useState<ActivityBucket[]>([])
   const [actRange,     setActRange]     = useState<'24h'|'7d'|'30d'|'1y'>('24h')
-  const [alerts,       setAlerts]       = useState<any[]>([])
-  const [evidence,     setEvidence]     = useState<any[]>([])
+  const [alerts,       setAlerts]       = useState<HealthAlert[]>([])
+  const [evidence,     setEvidence]     = useState<AuditEntry[]>([])
   const [loading,      setLoading]      = useState(true)
 
   const loadActivity = (range: '24h'|'7d'|'30d'|'1y') => {
@@ -49,31 +49,32 @@ export function Dashboard() {
       api.healthAlerts().catch(() => ({ alerts: [], summary: {} })),
       api.auditLog(8).catch(() => []),
     ]).then(([sy, j, sn, rt, r, rh, hs, act, al, ev]) => {
-      setSystems(sy as System[])
-      setJobs(j as BackupJob[])
-      setSnapshots(sn as Snapshot[])
-      setRestoreTests(rt as RestoreTest[])
-      setRepos(r as BackupRepository[])
-      setRepoHealth(rh as RepositoryHealth[])
-      setHealthScore(hs as HealthScore|null)
-      setActivity(act as ActivityBucket[])
-      setAlerts(((al as any)?.alerts ?? []) as any[])
-      setEvidence(ev as any[])
+      setSystems(sy)
+      setJobs(j)
+      setSnapshots(sn)
+      setRestoreTests(rt)
+      setRepos(r)
+      setRepoHealth(rh)
+      setHealthScore(hs)
+      setActivity(act)
+      setAlerts(al.alerts)
+      setEvidence(ev)
     }).finally(() => setLoading(false))
 
     // Live-refresh: systems + jobs every 30s so LastSeen / agent status stay current
     const tick = setInterval(() => {
-      api.systems().then(s => setSystems(s as System[])).catch(() => {})
-      api.jobs().then(j => setJobs(j as BackupJob[])).catch(() => {})
+      api.systems().then(setSystems).catch(() => {})
+      api.jobs().then(setJobs).catch(() => {})
     }, 30_000)
     return () => clearInterval(tick)
   }, [])
 
   // ── Derived ───────────────────────────────────────────────────────────────
+  const [renderedAt] = useState(Date.now)
   const successJobs   = jobs.filter(j => j.Status === 'success').length
   const failedJobs    = jobs.filter(j => j.Status === 'failed').length
   const failedLast24h = jobs.filter(j =>
-    j.Status === 'failed' && (Date.now() - new Date(j.CreatedAt).getTime()) < 86_400_000
+    j.Status === 'failed' && (renderedAt - new Date(j.CreatedAt).getTime()) < 86_400_000
   ).length
   const successRate   = jobs.length > 0 ? Math.round(successJobs / jobs.length * 100) : 0
   const verifiedSnaps = snapshots.filter(sn =>
@@ -87,16 +88,16 @@ export function Dashboard() {
 
   // Throughput: bytes uploaded in last 24h and 7d
   const bytes24h = jobs
-    .filter(j => j.Status === 'success' && (Date.now() - new Date(j.CreatedAt).getTime()) < 86_400_000)
+    .filter(j => j.Status === 'success' && (renderedAt - new Date(j.CreatedAt).getTime()) < 86_400_000)
     .reduce((a, j) => a + (j.BytesUploaded ?? 0), 0)
   const bytes7d = jobs
-    .filter(j => j.Status === 'success' && (Date.now() - new Date(j.CreatedAt).getTime()) < 7 * 86_400_000)
+    .filter(j => j.Status === 'success' && (renderedAt - new Date(j.CreatedAt).getTime()) < 7 * 86_400_000)
     .reduce((a, j) => a + (j.BytesUploaded ?? 0), 0)
   const systemMap       = Object.fromEntries(systems.map(s => [s.ID, s.Hostname]))
   const recentJobs      = [...jobs]
     .sort((a, b) => new Date(b.CreatedAt).getTime() - new Date(a.CreatedAt).getTime())
     .slice(0, 8)
-  const notifCount = alerts.filter((a: any) => a.severity === 'critical' || a.severity === 'warning').length
+  const notifCount = alerts.filter(alert => alert.severity === 'critical' || alert.severity === 'warning').length
 
   if (loading) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', color:'var(--text-muted)', fontSize:13 }}>

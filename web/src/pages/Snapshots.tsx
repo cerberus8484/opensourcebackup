@@ -31,7 +31,7 @@ export function Snapshots() {
           <Table
             cols={[
               { header:'Snapshot ID',  render:sn=><span style={s.mono}>{sn.EngineSnapshotID.slice(0,14)}…</span> },
-              { header:'Restore Test', render:_=><StatusBadge status="not tested" />, width:'120px' },
+              { header:'Restore Test', render:()=><StatusBadge status="not tested" />, width:'120px' },
               { header:'Checksum',     render:sn=><StatusBadge status={sn.ChecksumStatus} />, width:'110px' },
               { header:'Size',         render:sn=>{ const j=jobs.find(j=>j.ID===sn.JobID); return fmt(j?.BytesUploaded) }},
               { header:'Paths',        render:sn=>(

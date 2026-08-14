@@ -31,6 +31,12 @@ var ErrConflict = errors.New("agent: conflict — job no longer accepts this cha
 // Also permanent from the outbox's perspective.
 var ErrNotFound = errors.New("agent: not found")
 
+// ErrDispatchDeferred is returned on HTTP 429 — the control plane declined to
+// start the job right now (e.g. the agent is at its per-agent concurrency limit,
+// E1.1). This is NOT a failure: the job stays pending and the agent simply retries
+// on a later poll. It must never be treated as a terminal/permanent outcome.
+var ErrDispatchDeferred = errors.New("agent: dispatch deferred — control plane concurrency limit; job stays pending")
+
 // Client communicates with the OpensourceBackup control plane using
 // the authenticated /v1/agent/* routes.
 type Client struct {
@@ -60,11 +66,11 @@ func New(baseURL, token string, skipTLSVerify ...bool) *Client {
 
 // HeartbeatResponse is the server response to a heartbeat.
 type HeartbeatResponse struct {
-	Status            string `json:"status"`
-	ServerTime        string `json:"server_time"`
+	Status             string `json:"status"`
+	ServerTime         string `json:"server_time"`
 	RecommendedVersion string `json:"recommended_version"`
-	UpdateAvailable   bool   `json:"update_available"`
-	UpdateDownloadURL string `json:"update_download_url"`
+	UpdateAvailable    bool   `json:"update_available"`
+	UpdateDownloadURL  string `json:"update_download_url"`
 }
 
 // Heartbeat stamps last_seen on the control plane for the authenticated system.
@@ -251,6 +257,9 @@ func (c *Client) get(ctx context.Context, url string, out any) error {
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrNotFound
 	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return ErrDispatchDeferred
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
@@ -293,6 +302,9 @@ func (c *Client) sendJSON(ctx context.Context, method, url string, body any, out
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrNotFound
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return ErrDispatchDeferred
 	}
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)

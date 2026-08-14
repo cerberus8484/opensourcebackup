@@ -80,7 +80,7 @@ export function Alerts() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { queueMicrotask(load) }, [])
 
   const alerts = data?.alerts ?? []
   const summary = data?.summary ?? { total: 0, critical: 0, warning: 0, info: 0 }

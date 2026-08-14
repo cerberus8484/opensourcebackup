@@ -50,6 +50,9 @@ const (
 	ActionAuthLoginFail Action = "auth.login_fail"
 	ActionAuthLogout    Action = "auth.logout"
 
+	// System
+	ActionSystemOperationStateChanged Action = "system.operation_state_changed"
+
 	// Enrollment
 	ActionEnrollmentTokenCreated Action = "enrollment_token.created"
 	ActionAgentEnrolled          Action = "agent.enrolled"
@@ -78,9 +81,9 @@ const (
 	ActionRestoreTestFailed    Action = "restore_test.failed"
 
 	// Retention
-	ActionRetentionJobCreated     Action = "retention.job_created"
-	ActionRetentionCompleted      Action = "retention.completed"
-	ActionRetentionFailed         Action = "retention.failed"
+	ActionRetentionJobCreated      Action = "retention.job_created"
+	ActionRetentionCompleted       Action = "retention.completed"
+	ActionRetentionFailed          Action = "retention.failed"
 	ActionRetentionSnapshotRemoved Action = "retention.snapshot_removed"
 
 	// GDPR
@@ -88,19 +91,19 @@ const (
 	ActionGDPRPurge  Action = "gdpr.purge"
 
 	// Legacy aliases kept for backward compatibility
-	ActionCreate = ActionRepositoryCreated
-	ActionUpdate = ActionRepositoryUpdated
-	ActionDelete = ActionRepositoryDeleted
-	ActionPurge  = ActionGDPRPurge
-	ActionExport = ActionGDPRExport
-	ActionLogin  = ActionAuthLogin
-	ActionLoginFail = ActionAuthLoginFail
-	ActionLogout    = ActionAuthLogout
-	ActionTokenRevoke = ActionTokenRevoked
-	ActionBackupStart    = ActionBackupStarted
-	ActionBackupComplete = ActionBackupCompleted
-	ActionBackupFail     = ActionBackupFailed
-	ActionRestoreStart   Action = "restore.started"
+	ActionCreate                 = ActionRepositoryCreated
+	ActionUpdate                 = ActionRepositoryUpdated
+	ActionDelete                 = ActionRepositoryDeleted
+	ActionPurge                  = ActionGDPRPurge
+	ActionExport                 = ActionGDPRExport
+	ActionLogin                  = ActionAuthLogin
+	ActionLoginFail              = ActionAuthLoginFail
+	ActionLogout                 = ActionAuthLogout
+	ActionTokenRevoke            = ActionTokenRevoked
+	ActionBackupStart            = ActionBackupStarted
+	ActionBackupComplete         = ActionBackupCompleted
+	ActionBackupFail             = ActionBackupFailed
+	ActionRestoreStart    Action = "restore.started"
 	ActionRestoreComplete Action = "restore.completed"
 	ActionRestoreFail     Action = "restore.failed"
 )
@@ -134,7 +137,7 @@ type Entry struct {
 	Actor        string    // specific actor: "admin", "agent:<system_id>"
 	IP           string    // hashed client IP (security.ClientIPHashed)
 	UserAgent    string
-	Details      string   // free-text; must NOT contain secrets or PII
+	Details      string // free-text; must NOT contain secrets or PII
 	Severity     Severity
 	Success      bool
 }
@@ -159,14 +162,14 @@ func Event(action Action, resourceType ResourceType, resourceID string) *builder
 	}}
 }
 
-func (b *builder) By(t ActorType) *builder       { b.e.ActorType = t; return b }
-func (b *builder) Actor(name string) *builder    { b.e.Actor = name; return b }
-func (b *builder) IP(ip string) *builder         { b.e.IP = ip; return b }
-func (b *builder) UA(ua string) *builder         { b.e.UserAgent = ua; return b }
-func (b *builder) Details(d string) *builder     { b.e.Details = d; return b }
-func (b *builder) Severity(s Severity) *builder  { b.e.Severity = s; return b }
-func (b *builder) Failed() *builder              { b.e.Success = false; return b }
-func (b *builder) Build() Entry                  { return b.e }
+func (b *builder) By(t ActorType) *builder      { b.e.ActorType = t; return b }
+func (b *builder) Actor(name string) *builder   { b.e.Actor = name; return b }
+func (b *builder) IP(ip string) *builder        { b.e.IP = ip; return b }
+func (b *builder) UA(ua string) *builder        { b.e.UserAgent = ua; return b }
+func (b *builder) Details(d string) *builder    { b.e.Details = d; return b }
+func (b *builder) Severity(s Severity) *builder { b.e.Severity = s; return b }
+func (b *builder) Failed() *builder             { b.e.Success = false; return b }
+func (b *builder) Build() Entry                 { return b.e }
 
 // ── Store interface ───────────────────────────────────────────────────────────
 

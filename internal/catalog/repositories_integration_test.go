@@ -58,6 +58,9 @@ func TestRepositoryStore_GetByID_ReturnsRepository_WhenExists(t *testing.T) {
 	if got.EncryptionMode == nil || *got.EncryptionMode != "aes256" {
 		t.Error("EncryptionMode: want aes256")
 	}
+	if got.SecurityPosture.Encryption != catalog.SecurityProvenanceDeclared || got.SecurityPosture.ObjectLock != catalog.SecurityProvenanceDeclared || got.SecurityPosture.Immutability != catalog.SecurityProvenanceDeclared {
+		t.Errorf("configured security claims must remain DECLARED, got %+v", got.SecurityPosture)
+	}
 }
 
 func TestRepositoryStore_GetByID_ReturnsErrNotFound_WhenMissing(t *testing.T) {
@@ -114,6 +117,9 @@ func TestRepositoryStore_Update_PersistsChanges(t *testing.T) {
 	}
 	if got.Location != "s3:new-bucket" {
 		t.Errorf("Location: want s3:new-bucket, got %s", got.Location)
+	}
+	if got.SecurityPosture.ObjectLock != catalog.SecurityProvenanceDeclared {
+		t.Errorf("object lock posture = %q, want DECLARED", got.SecurityPosture.ObjectLock)
 	}
 }
 

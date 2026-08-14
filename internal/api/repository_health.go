@@ -110,6 +110,7 @@ func (h *Handler) handleRepositoryHealth(w http.ResponseWriter, r *http.Request)
 		RepositoryID:      id,
 		EncryptionEnabled: repo.EncryptionMode != nil && *repo.EncryptionMode != "",
 		ImmutableMode:     repo.ImmutableMode,
+		SecurityPosture:   repo.SecurityPosture,
 		SnapshotCount:     len(repoSnaps),
 		VerifiedCount:     verifiedCount,
 		LastBackupAt:      lastBackup,
@@ -137,9 +138,9 @@ func (h *Handler) handleListRepositoryHealth(w http.ResponseWriter, r *http.Requ
 
 	// Load all data once — avoid N+1 queries
 	allSnapshots, _ := h.snapshots.List(ctx)
-	allRTs, _       := h.restoreTests.List(ctx)
-	allJobs, _      := h.jobs.List(ctx)
-	allPolicies, _  := h.policies.List(ctx)
+	allRTs, _ := h.restoreTests.List(ctx)
+	allJobs, _ := h.jobs.List(ctx)
+	allPolicies, _ := h.policies.List(ctx)
 
 	// Build indices
 	snapsByRepo := make(map[uuid.UUID][]catalog.Snapshot)
@@ -227,6 +228,7 @@ func (h *Handler) handleListRepositoryHealth(w http.ResponseWriter, r *http.Requ
 			RepositoryID:      repo.ID,
 			EncryptionEnabled: repo.EncryptionMode != nil && *repo.EncryptionMode != "",
 			ImmutableMode:     repo.ImmutableMode,
+			SecurityPosture:   repo.SecurityPosture,
 			SnapshotCount:     len(snaps),
 			VerifiedCount:     a.verified,
 			LastBackupAt:      a.lastBackup,

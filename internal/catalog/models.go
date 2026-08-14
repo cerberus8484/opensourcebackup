@@ -1,10 +1,99 @@
 package catalog
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// RepositoryBackendType is the canonical storage backend classification.
+// Type remains the legacy/operator-facing engine label so existing agents and
+// policies continue to work unchanged.
+type RepositoryBackendType string
+
+const (
+	RepositoryBackendRESTServer RepositoryBackendType = "REST_SERVER"
+	RepositoryBackendS3         RepositoryBackendType = "S3"
+	RepositoryBackendMinIO      RepositoryBackendType = "MINIO"
+	RepositoryBackendFilesystem RepositoryBackendType = "FILESYSTEM"
+	RepositoryBackendUnknown    RepositoryBackendType = "UNKNOWN"
+)
+
+// RepositoryManagementMode distinguishes pre-existing operator-managed
+// repositories from future control-plane-managed integrations.
+type RepositoryManagementMode string
+
+const (
+	RepositoryManagementLegacy  RepositoryManagementMode = "LEGACY"
+	RepositoryManagementManaged RepositoryManagementMode = "MANAGED"
+)
+
+// SecurityProvenance records how a repository security claim was established.
+// E2.1a only creates DECLARED values; no storage property is verified here.
+type SecurityProvenance string
+
+const (
+	SecurityProvenanceUnknown    SecurityProvenance = "UNKNOWN"
+	SecurityProvenanceDeclared   SecurityProvenance = "DECLARED"
+	SecurityProvenanceDiscovered SecurityProvenance = "DISCOVERED"
+	SecurityProvenanceVerified   SecurityProvenance = "VERIFIED"
+)
+
+type RepositorySecurityPosture struct {
+	Encryption   SecurityProvenance
+	ObjectLock   SecurityProvenance
+	Immutability SecurityProvenance
+}
+
+// ClassifyRepositoryBackend maps known legacy labels and locations to a stable
+// backend type. Ambiguous values deliberately stay UNKNOWN.
+func ClassifyRepositoryBackend(repositoryType, location string) RepositoryBackendType {
+	t := strings.ToLower(strings.TrimSpace(repositoryType))
+	switch t {
+	case "rest_server", "rest-server", "rest server":
+		return RepositoryBackendRESTServer
+	case "s3", "aws-s3", "aws_s3":
+		return RepositoryBackendS3
+	case "minio", "minio-s3", "minio_s3":
+		return RepositoryBackendMinIO
+	case "local", "filesystem", "file_system", "nas-nfs", "nas-smb", "proxmox":
+		return RepositoryBackendFilesystem
+	}
+
+	l := strings.ToLower(strings.TrimSpace(location))
+	switch {
+	case strings.HasPrefix(l, "rest:"):
+		return RepositoryBackendRESTServer
+	case strings.HasPrefix(l, "s3:") || strings.HasPrefix(l, "s3://"):
+		return RepositoryBackendS3
+	case strings.HasPrefix(l, "/"), strings.HasPrefix(l, "\\\\"):
+		return RepositoryBackendFilesystem
+	}
+	return RepositoryBackendUnknown
+}
+
+// DeclaredSecurityPosture derives the maximum provenance E2.1a can claim from
+// operator-provided fields. It intentionally never returns VERIFIED.
+func DeclaredSecurityPosture(r *BackupRepository) RepositorySecurityPosture {
+	posture := RepositorySecurityPosture{}
+	if r.EncryptionMode != nil && strings.TrimSpace(*r.EncryptionMode) != "" {
+		posture.Encryption = SecurityProvenanceDeclared
+	} else {
+		posture.Encryption = SecurityProvenanceUnknown
+	}
+	if r.ObjectLockEnabled {
+		posture.ObjectLock = SecurityProvenanceDeclared
+	} else {
+		posture.ObjectLock = SecurityProvenanceUnknown
+	}
+	if r.ImmutableMode.IsProtected() {
+		posture.Immutability = SecurityProvenanceDeclared
+	} else {
+		posture.Immutability = SecurityProvenanceUnknown
+	}
+	return posture
+}
 
 type System struct {
 	ID           uuid.UUID
@@ -14,7 +103,12 @@ type System struct {
 	LastSeen     *time.Time
 	Tags         map[string]any
 	RiskClass    string
-	CreatedAt    time.Time
+	// OperationState is the admin-set operation state (E1.2): active | maintenance |
+	// draining | suspended. Governs whether new jobs may be dispatched. Separate
+	// from the observed (derived, non-stored) health state.
+	OperationState          string
+	OperationStateChangedAt *time.Time
+	CreatedAt               time.Time
 }
 
 // ImmutableMode documents the write-protection mechanism of a repository.
@@ -26,7 +120,7 @@ const (
 	ImmutableObjectLock ImmutableMode = "object_lock" // S3/MinIO Object Lock
 	ImmutableWORM       ImmutableMode = "worm"        // hardware/NAS WORM
 	ImmutableAppendOnly ImmutableMode = "append_only" // restic --append-only or similar
-	ImmutableUnknown    ImmutableMode = "unknown"      // not verified
+	ImmutableUnknown    ImmutableMode = "unknown"     // not verified
 )
 
 // IsProtected reports whether this mode provides any form of write protection.
@@ -38,24 +132,67 @@ type BackupRepository struct {
 	ID                uuid.UUID
 	Type              string
 	Location          string
+	BackendType       RepositoryBackendType
+	ManagementMode    RepositoryManagementMode
 	EncryptionMode    *string
 	ObjectLockEnabled bool
 	ImmutableMode     ImmutableMode // preferred over ObjectLockEnabled for new code
+	SecurityPosture   RepositorySecurityPosture
 	RetentionPolicyID *uuid.UUID
 	CreatedAt         time.Time
+}
+
+type CredentialPurpose string
+
+const (
+	CredentialPurposeBackupWrite     CredentialPurpose = "BACKUP_WRITE"
+	CredentialPurposeRestoreRead     CredentialPurpose = "RESTORE_READ"
+	CredentialPurposeRetention       CredentialPurpose = "RETENTION"
+	CredentialPurposeRepositoryAdmin CredentialPurpose = "REPOSITORY_ADMIN"
+)
+
+func (p CredentialPurpose) Valid() bool {
+	switch p {
+	case CredentialPurposeBackupWrite, CredentialPurposeRestoreRead, CredentialPurposeRetention, CredentialPurposeRepositoryAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
+type CredentialReferenceStatus string
+
+const (
+	CredentialReferenceActive   CredentialReferenceStatus = "ACTIVE"
+	CredentialReferenceDisabled CredentialReferenceStatus = "DISABLED"
+	CredentialReferenceRevoked  CredentialReferenceStatus = "REVOKED"
+)
+
+// RepositoryCredentialReference stores metadata only. It must never contain a
+// credential value, token, password, or private key.
+type RepositoryCredentialReference struct {
+	ID           uuid.UUID
+	RepositoryID uuid.UUID
+	Purpose      CredentialPurpose
+	ProviderType string
+	Reference    string
+	Status       CredentialReferenceStatus
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // RepositoryHealth holds derived health indicators for a repository.
 // Computed on demand — never stored. Honest: no fake "healthy" without evidence.
 type RepositoryHealth struct {
-	RepositoryID       uuid.UUID
-	EncryptionEnabled  bool
-	ImmutableMode      ImmutableMode
-	SnapshotCount      int
-	VerifiedCount      int     // snapshots with successful restore test
-	LastBackupAt       *time.Time
-	LastRestoreTestAt  *time.Time
-	LastRetentionAt    *time.Time
+	RepositoryID      uuid.UUID
+	EncryptionEnabled bool
+	ImmutableMode     ImmutableMode
+	SecurityPosture   RepositorySecurityPosture
+	SnapshotCount     int
+	VerifiedCount     int // snapshots with successful restore test
+	LastBackupAt      *time.Time
+	LastRestoreTestAt *time.Time
+	LastRetentionAt   *time.Time
 }
 
 // RetentionPlan holds the restic-compatible keep rules for a policy.
@@ -99,7 +236,7 @@ type ScheduleConfig struct {
 
 // AdvancedConfig holds performance and auto-update settings.
 type AdvancedConfig struct {
-	BandwidthLimitKbps int  `json:"bandwidth_limit_kbps"` // 0 = unlimited
+	BandwidthLimitKbps int `json:"bandwidth_limit_kbps"` // 0 = unlimited
 }
 
 type BackupPolicy struct {
@@ -107,7 +244,7 @@ type BackupPolicy struct {
 	Name           string
 	Includes       []string
 	Excludes       []string
-	Schedule       *string       // legacy cron field — use ScheduleConfig.Cron for new code
+	Schedule       *string // legacy cron field — use ScheduleConfig.Cron for new code
 	ScheduleConfig ScheduleConfig
 	Advanced       AdvancedConfig
 	Retention      map[string]any
@@ -147,7 +284,7 @@ type BackupJob struct {
 	ID            uuid.UUID
 	SystemID      uuid.UUID
 	PolicyID      uuid.UUID
-	Type          string     // "backup" | "retention" — see JobTypeBackup / JobTypeRetention
+	Type          string // "backup" | "retention" — see JobTypeBackup / JobTypeRetention
 	StartedAt     *time.Time
 	FinishedAt    *time.Time
 	Status        string

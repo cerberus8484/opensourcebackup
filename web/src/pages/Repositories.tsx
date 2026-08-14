@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type BackupRepository, type ImmutableMode } from '../api'
+import { api, type BackupRepository, type ImmutableMode, type SecurityProvenance } from '../api'
 import { Card, SectionHeader } from '../components/Card'
 import { Table } from '../components/Table'
 import { Modal } from '../components/Modal'
@@ -110,12 +110,10 @@ export function Repositories() {
         {loading ? <div style={s.load}>Loading…</div> : (
           <Table
             cols={[
-              { header:'Type',       render:r => <span style={s.badge}>{r.Type}</span>, width:'100px' },
+              { header:'Backend',    render:r => <span style={s.badge}>{r.BackendType ?? 'UNKNOWN'}</span>, width:'110px' },
               { header:'Location',   render:r => <span style={s.mono}>{r.Location}</span> },
-              { header:'Encryption', render:r => r.EncryptionMode
-                  ? <span style={s.enc}>{r.EncryptionMode}</span>
-                  : <span style={s.dim}>—</span>, width:'100px' },
-              { header:'Immutability', render:r => <ImmutableBadge mode={r.ImmutableMode} />, width:'120px' },
+              { header:'Encryption', render:r => <SecurityBadge configured={Boolean(r.EncryptionMode)} provenance={r.SecurityPosture?.Encryption} label={r.EncryptionMode ?? 'Not configured'} />, width:'140px' },
+              { header:'Immutability', render:r => <ImmutableBadge mode={r.ImmutableMode} provenance={r.SecurityPosture?.Immutability} />, width:'150px' },
               { header:'ID',         render:r => <span style={s.mono}>{r.ID.slice(0,8)}…</span> },
               { header:'Created',    render:r => new Date(r.CreatedAt).toLocaleDateString() },
               { header:'',           render:r => (
@@ -231,7 +229,14 @@ const IMMUTABLE_CONFIG: Record<string, { label: string; color: string; icon: str
   none:         { label: 'None',        color: 'var(--text-dim)', icon: '—',  tip: 'No write protection configured' },
 }
 
-function ImmutableBadge({ mode }: { mode?: string }) {
+function SecurityBadge({ configured, provenance, label }: { configured: boolean; provenance?: SecurityProvenance; label: string }) {
+  const verified = configured && provenance === 'VERIFIED'
+  return <span style={{ fontSize:12, color: verified ? 'var(--success)' : configured ? 'var(--warning)' : 'var(--text-dim)' }}>
+    {label}{configured && ` (${verified ? 'verified' : 'declared'})`}
+  </span>
+}
+
+function ImmutableBadge({ mode, provenance }: { mode?: string; provenance?: SecurityProvenance }) {
   const cfg = IMMUTABLE_CONFIG[mode ?? 'none'] ?? IMMUTABLE_CONFIG['none']
   return (
     <span title={cfg.tip} style={{
@@ -239,7 +244,7 @@ function ImmutableBadge({ mode }: { mode?: string }) {
       fontSize: 11, fontWeight: 600, color: cfg.color,
     }}>
       <span>{cfg.icon}</span>
-      {cfg.label}
+      {cfg.label}{mode && mode !== 'none' && ` (${provenance === 'VERIFIED' ? 'verified' : 'declared'})`}
     </span>
   )
 }
