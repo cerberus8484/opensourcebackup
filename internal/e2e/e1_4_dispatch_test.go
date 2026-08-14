@@ -214,7 +214,9 @@ func buildFakeRestic(t *testing.T) (string, string) {
 func runAgent(ctx context.Context, t *testing.T, baseURL, token, resticBin string) string {
 	t.Helper()
 	outboxDir := t.TempDir()
-	a := agent.New(agent.Config{PollInterval: 75 * time.Millisecond, ResticBin: resticBin, ResticPassword: "e2e-only", ResticRepo: "fake://unused", OutboxDir: outboxDir}, agentclient.New(baseURL, token), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Keep the fixture value ephemeral so no credential-like literal is committed.
+	resticPassword := "e2e-" + uuid.NewString()
+	a := agent.New(agent.Config{PollInterval: 75 * time.Millisecond, ResticBin: resticBin, ResticPassword: resticPassword, ResticRepo: "fake://unused", OutboxDir: outboxDir}, agentclient.New(baseURL, token), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	go func() { _ = a.Run(ctx) }()
 	return outboxDir
 }
