@@ -12,6 +12,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased] — 2026-08-15
+
+### Security
+
+- **E2.1b-1 authorized repository-credential resolution boundary.** Future
+  secret resolution now has a tested server-side derivation from authenticated
+  system and job to policy, repository, derived purpose and active credential
+  reference. Callers cannot select a provider, reference, repository or
+  purpose. No secret is resolved or delivered in this slice; Vault/KMS, API and
+  agent delivery remain deliberately deferred.
+- **Fail-closed credential states.** Disabled, revoked, missing and ambiguous
+  references are denied. The future legacy `RESTIC_PASSWORD` fallback is
+  explicitly forbidden whenever a managed reference exists for that purpose.
+
 ## [Unreleased] — 2026-06-08
 
 ### Security — API hardening & CSP
